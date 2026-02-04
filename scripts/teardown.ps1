@@ -3,20 +3,28 @@ param(
   [switch]$Force
 )
 
-$rgNames = @(
-  "$Prefix-rg-onprem",
-  "$Prefix-rg-hub",
-  "$Prefix-rg-spoke1",
-  "$Prefix-rg-spoke2"
-)
+Write-Host "=================================================="
+Write-Host "Teardown: DNS Migration POC"
+Write-Host "=================================================="
+Write-Host ""
 
-foreach ($rg in $rgNames) {
-  if (Get-AzResourceGroup -Name $rg -ErrorAction SilentlyContinue) {
-    Write-Host "Removing $rg..."
-    if ($Force) {
-      Remove-AzResourceGroup -Name $rg -Force -AsJob | Out-Null
-    } else {
-      Remove-AzResourceGroup -Name $rg
-    }
+$rgName = "$Prefix-rg"
+
+if (Get-AzResourceGroup -Name $rgName -ErrorAction SilentlyContinue) {
+  Write-Host "Removing resource group: $rgName"
+  Write-Host "This includes all VNets, VMs, Private DNS, and DNS Resolver resources..."
+  Write-Host ""
+  
+  if ($Force) {
+    Remove-AzResourceGroup -Name $rgName -Force -AsJob | Out-Null
+    Write-Host "✓ Resource group deletion initiated (background job)"
+  } else {
+    Remove-AzResourceGroup -Name $rgName
+    Write-Host "✓ Resource group removed"
   }
+} else {
+  Write-Host "⚠ Resource group '$rgName' not found"
 }
+
+Write-Host ""
+Write-Host "Teardown complete"

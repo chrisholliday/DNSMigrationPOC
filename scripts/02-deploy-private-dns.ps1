@@ -1,38 +1,41 @@
 param(
     [string]$Location = 'centralus',
-    [string]$Prefix = 'dnsmig',
-    [switch]$LinkSpoke2
+    [string]$Prefix = 'dnsmig'
 )
 
 $root = Split-Path -Parent $PSScriptRoot
 $bicepFile = Join-Path $root 'bicep\private-dns.bicep'
-$outputDir = Join-Path $root 'outputs'
-$outputFile = Join-Path $outputDir 'private-dns.json'
+$rgName = "$Prefix-rg"
 
-$rgNames = @{
-    hub    = "$Prefix-rg-hub"
-    spoke1 = "$Prefix-rg-spoke1"
-    spoke2 = "$Prefix-rg-spoke2"
+Write-Host '=================================================='
+Write-Host 'Phase 2: Deploy Azure Private DNS'
+Write-Host '=================================================='
+
+Write-Host 'Deploying Azure Private DNS zone and resolver...'
+$deployParams = @{
+    ResourceGroupName       = $rgName
+    TemplateFile            = $bicepFile
+    TemplateParameterObject = @{
+        location = $Location
+        prefix   = $Prefix
+    }
 }
 
-if (-not (Test-Path $outputDir)) {
-    New-Item -ItemType Directory -Path $outputDir | Out-Null
+$deployment = New-AzResourceGroupDeployment @deployParams
+
+if ($deployment.ProvisioningState -eq 'Succeeded') {
+    Write-Host '✓ Phase 2 Complete: Azure Private DNS deployed'
+    Write-Host ''
+    Write-Host 'Deployed resources:'
+    Write-Host '  - Private DNS Zone: privatelink.blob.core.windows.net'
+    Write-Host "  - DNS Resolver: $Prefix-dns-resolver"
+    Write-Host "  - Inbound Endpoint: $Prefix-resolver-inbound"
+    Write-Host "  - Outbound Endpoint: $Prefix-resolver-outbound"
+}
+else {
+    Write-Error "Phase 2 deployment failed: $($deployment.ProvisioningState)"
+    exit 1
 }
 
-Write-Host 'Deploying Azure Private DNS and Private Resolver...'
-$deployment = New-AzSubscriptionDeployment \
--Name "$Prefix-private-dns" \
--Location $Location \
--TemplateFile $bicepFile \
--TemplateParameterObject @{
-    location   = $Location
-    prefix     = $Prefix
-    rgNames    = $rgNames
-    linkSpoke2 = [bool]$LinkSpoke2
-}
-
-$outputs = $deployment.Outputs
-$outputs | ConvertTo-Json -Depth 6 | Set-Content -Path $outputFile
-
-Write-Host "Saved outputs to $outputFile"
-$outputs | ConvertTo-Json -Depth 6 | Write-Host
+Write-Host ''
+Write-Host "Next: Configure legacy DNS forwarders with './scripts/03-configure-legacy-forwarders.ps1'"

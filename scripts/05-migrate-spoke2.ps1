@@ -1,17 +1,41 @@
 param(
-  [string]$Location = 'centralus',
-  [string]$Prefix = 'dnsmig'
+    [string]$Prefix = 'dnsmig'
 )
 
-$deployPrivateDns = Join-Path $PSScriptRoot '02-deploy-private-dns.ps1'
+$rgName = "$Prefix-rg"
 
-& $deployPrivateDns -Location $Location -Prefix $Prefix -LinkSpoke2
+Write-Host "=================================================="
+Write-Host "Phase 5: Migrate Spoke2 to Azure DNS"
+Write-Host "=================================================="
 
-$rgSpoke2 = "$Prefix-rg-spoke2"
-$vnetName = "$Prefix-spoke2-vnet"
+Write-Host "\nLinking Spoke2 VNet to Private DNS zone..."
+$privateDnsZone = Get-AzPrivateDnsZone -ResourceGroupName $rgName -Name 'privatelink.blob.core.windows.net' -ErrorAction SilentlyContinue
+if (-not $privateDnsZone) {
+    Write-Error "Private DNS Zone not found"
+    exit 1
+}
 
-$vnet = Get-AzVirtualNetwork -Name $vnetName -ResourceGroupName $rgSpoke2
-$vnet.DhcpOptions.DnsServers = @()
-Set-AzVirtualNetwork -VirtualNetwork $vnet | Out-Null
+$vnetSpoke2 = Get-AzVirtualNetwork -ResourceGroupName $rgName -Name 'dnsmig-spoke2-vnet'
+$existingLink = Get-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $rgName -ZoneName 'privatelink.blob.core.windows.net' -Name "$Prefix-spoke2-link" -ErrorAction SilentlyContinue
 
-Write-Host "Spoke2 VNet linked to Private DNS and set to Azure-provided DNS."
+if ($existingLink) {
+    Write-Host "  ! Spoke2 VNet already linked"
+} else {
+    New-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $rgName -ZoneName 'privatelink.blob.core.windows.net' -Name "$Prefix-spoke2-link" -VirtualNetworkId $vnetSpoke2.Id | Out-Null
+    Write-Host "  ✓ Spoke2 VNet linked to Private DNS zone"
+}
+
+Write-Host "\nSwitching Spoke2 VNet to Azure-provided DNS..."
+$vnetSpoke2.DhcpOptions.DnsServers = @()
+Set-AzVirtualNetwork -VirtualNetwork $vnetSpoke2 | Out-Null
+Write-Host "  ✓ Spoke2 VNet DNS servers cleared"
+
+Write-Host ""
+Write-Host "=================================================="
+Write-Host "✓ Phase 5 Complete: Spoke2 Migrated"
+Write-Host "=================================================="
+Write-Host ""
+Write-Host "Both Spoke1 and Spoke2 are now using Azure-provided DNS"
+Write-Host "and resolving privatelink.blob.core.windows.net via Private DNS."
+Write-Host ""
+Write-Host "Next: Validate final DNS resolution with './scripts/validate.ps1 -Phase AfterSpoke2'"

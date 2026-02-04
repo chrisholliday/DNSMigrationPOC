@@ -1,37 +1,87 @@
 param(
-  [string]$Prefix = 'dnsmig',
-  [string]$InboundResolverIp,
-  [string]$OutputsPath
+    [string]$Prefix = 'dnsmig'
 )
 
-$root = Split-Path -Parent $PSScriptRoot
-$defaultOutputs = Join-Path $root 'outputs\private-dns.json'
-$resolvedOutputs = if ($OutputsPath) { $OutputsPath } else { $defaultOutputs }
+$rgName = "$Prefix-rg"
 
-if (-not $InboundResolverIp) {
-  if (-not (Test-Path $resolvedOutputs)) {
-    throw "Inbound resolver IP not provided and outputs file not found at $resolvedOutputs"
-  }
-  $json = Get-Content -Path $resolvedOutputs -Raw | ConvertFrom-Json
-  $InboundResolverIp = $json.inboundResolverIp.value
+Write-Host "=================================================="
+Write-Host "Phase 3: Configure Legacy Forwarders"
+Write-Host "=================================================="
+
+# Get inbound resolver IP from Private Resolver
+Write-Host "\nRetrieving Private Resolver inbound endpoint IP..."
+$resolver = Get-AzResource -ResourceGroupName $rgName -ResourceType 'Microsoft.Network/dnsResolvers' -ErrorAction SilentlyContinue
+if (-not $resolver) {
+    Write-Error "DNS Resolver not found in $rgName"
+    exit 1
 }
 
-$rgOnprem = "$Prefix-rg-onprem"
-$rgHub = "$Prefix-rg-hub"
-$onpremDnsVm = "$Prefix-onprem-vm-dns"
-$hubDnsVm = "$Prefix-hub-vm-dns"
+$inboundEndpoint = Get-AzResource -ResourceGroupName $rgName -ResourceType 'Microsoft.Network/dnsResolvers/inboundEndpoints' -ErrorAction SilentlyContinue
+if (-not $inboundEndpoint) {
+    Write-Error "Inbound endpoint not found"
+    exit 1
+}
 
+$inboundNic = Get-AzNetworkInterface -ResourceGroupName $rgName -Name "$Prefix-resolver-inbound-nic" -ErrorAction SilentlyContinue
+if (-not $inboundNic) {
+    Write-Host "  ! Inbound NIC not found, using default IP 10.20.2.4"
+    $InboundResolverIp = '10.20.2.4'
+} else {
+    $InboundResolverIp = $inboundNic.IpConfigurations[0].PrivateIpAddress
+    Write-Host "  ✓ Inbound resolver IP: $InboundResolverIp"
+}
+
+# Script to update forwarders on DNS VMs
 $updateScript = @"
+#!/bin/bash
 set -e
-sudo sed -i '/privatelink.blob./d' /etc/dnsmasq.d/custom.conf
-echo "server=/privatelink.blob.core.windows.net/$InboundResolverIp" | sudo tee /etc/dnsmasq.d/privatelink-forward.conf >/dev/null
-sudo systemctl restart dnsmasq
+
+# Remove old privatelink forward rule if it exists
+rm -f /etc/dnsmasq.d/privatelink-forward.conf 2>/dev/null || true
+
+# Add new forward rule to inbound resolver
+echo "server=/privatelink.blob.core.windows.net/$InboundResolverIp" > /etc/dnsmasq.d/privatelink-forward.conf
+
+# Restart dnsmasq
+systemctl restart dnsmasq
+
+echo "Forwarder configured for privatelink.blob.core.windows.net → $InboundResolverIp"
 "@
 
-Write-Host "Updating hub DNS forwarder to use inbound resolver: $InboundResolverIp"
-Invoke-AzVMRunCommand -ResourceGroupName $rgHub -Name $hubDnsVm -CommandId 'RunShellScript' -ScriptString $updateScript | Out-Null
+Write-Host "\nUpdating on-prem DNS forwarder..."
+$result = Invoke-AzVMRunCommand `
+    -ResourceGroupName $rgName `
+    -VMName 'dnsmig-onprem-dns' `
+    -CommandId 'RunShellScript' `
+    -ScriptString $updateScript `
+    -ErrorAction SilentlyContinue
 
-Write-Host "Updating on-prem DNS forwarder to use inbound resolver: $InboundResolverIp"
-Invoke-AzVMRunCommand -ResourceGroupName $rgOnprem -Name $onpremDnsVm -CommandId 'RunShellScript' -ScriptString $updateScript | Out-Null
+if ($result.Value[0].Message -match 'Forwarder configured') {
+    Write-Host "  ✓ On-prem forwarder updated"
+} else {
+    Write-Host "  ! Status: $($result.Value[0].Message | Select-Object -First 100)"
+}
 
-Write-Host "Forwarders updated."
+Write-Host "\nUpdating hub DNS forwarder..."
+$result = Invoke-AzVMRunCommand `
+    -ResourceGroupName $rgName `
+    -VMName 'dnsmig-hub-dns' `
+    -CommandId 'RunShellScript' `
+    -ScriptString $updateScript `
+    -ErrorAction SilentlyContinue
+
+if ($result.Value[0].Message -match 'Forwarder configured') {
+    Write-Host "  ✓ Hub forwarder updated"
+} else {
+    Write-Host "  ! Status: $($result.Value[0].Message | Select-Object -First 100)"
+}
+
+Write-Host ""
+Write-Host "=================================================="
+Write-Host "✓ Phase 3 Complete: Forwarders Updated"
+Write-Host "=================================================="
+Write-Host ""
+Write-Host "Legacy DNS servers now forward privatelink.blob.core.windows.net"
+Write-Host "to the Private Resolver inbound endpoint ($InboundResolverIp)"
+Write-Host ""
+Write-Host "Next: Validate DNS resolution with './scripts/validate.ps1 -Phase AfterForwarders'"

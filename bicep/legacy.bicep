@@ -179,6 +179,10 @@ module spoke2 './modules/legacy-spoke.bicep' = {
 
 module peerOnpremToHub './modules/legacy-peering.bicep' = {
   scope: rgOnprem
+  dependsOn: [
+    onprem
+    hub
+  ]
   params: {
     localVnetName: names.onpremVnet
     peeringName: 'peer-onprem-to-hub'
@@ -193,6 +197,10 @@ module peerOnpremToHub './modules/legacy-peering.bicep' = {
 
 module peerHubToOnprem './modules/legacy-peering.bicep' = {
   scope: rgHub
+  dependsOn: [
+    onprem
+    hub
+  ]
   params: {
     localVnetName: names.hubVnet
     peeringName: 'peer-hub-to-onprem'
@@ -207,6 +215,10 @@ module peerHubToOnprem './modules/legacy-peering.bicep' = {
 
 module peerHubToSpoke1 './modules/legacy-peering.bicep' = {
   scope: rgHub
+  dependsOn: [
+    hub
+    spoke1
+  ]
   params: {
     localVnetName: names.hubVnet
     peeringName: 'peer-hub-to-spoke1'
@@ -221,6 +233,10 @@ module peerHubToSpoke1 './modules/legacy-peering.bicep' = {
 
 module peerSpoke1ToHub './modules/legacy-peering.bicep' = {
   scope: rgSpoke1
+  dependsOn: [
+    hub
+    spoke1
+  ]
   params: {
     localVnetName: names.spoke1Vnet
     peeringName: 'peer-spoke1-to-hub'
@@ -235,6 +251,10 @@ module peerSpoke1ToHub './modules/legacy-peering.bicep' = {
 
 module peerHubToSpoke2 './modules/legacy-peering.bicep' = {
   scope: rgHub
+  dependsOn: [
+    hub
+    spoke2
+  ]
   params: {
     localVnetName: names.hubVnet
     peeringName: 'peer-hub-to-spoke2'
@@ -249,6 +269,10 @@ module peerHubToSpoke2 './modules/legacy-peering.bicep' = {
 
 module peerSpoke2ToHub './modules/legacy-peering.bicep' = {
   scope: rgSpoke2
+  dependsOn: [
+    hub
+    spoke2
+  ]
   params: {
     localVnetName: names.spoke2Vnet
     peeringName: 'peer-spoke2-to-hub'

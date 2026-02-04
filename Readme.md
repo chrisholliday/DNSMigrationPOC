@@ -51,6 +51,12 @@ Deploy the full topology with **Linux DNS only**.
 
 Script: [scripts/01-deploy-legacy.ps1](scripts/01-deploy-legacy.ps1)
 
+### Phase 1b — Configure DNS Servers
+
+Install and configure dnsmasq on the DNS VMs to serve the zones.
+
+Script: [scripts/03a-configure-dns-servers.ps1](scripts/03a-configure-dns-servers.ps1)
+
 ### Phase 2 — Azure Private DNS + Resolver
 
 - Create the Azure Private DNS zone for `privatelink.blob.core.windows.net`.
@@ -87,6 +93,7 @@ Script: [scripts/validate.ps1](scripts/validate.ps1)
 ## Documentation
 
 - Architecture overview: [docs/Architecture.md](docs/Architecture.md)
+- Deployment guide: [docs/Deployment-Guide.md](docs/Deployment-Guide.md)
 - Migration runbook: [docs/Migration-Runbook.md](docs/Migration-Runbook.md)
 - Security considerations beyond the POC: [docs/Security-Considerations.md](docs/Security-Considerations.md)
 

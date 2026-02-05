@@ -2,14 +2,14 @@ param(
     [string]$Prefix = 'dnsmig'
 )
 
-$rgName = "$Prefix-rg"
+$rgSpoke1 = "$Prefix-rg-spoke1"
 
 Write-Host "=================================================="
 Write-Host "Phase 4: Migrate Spoke1 to Azure DNS"
 Write-Host "=================================================="
 
 Write-Host "\nSwitching Spoke1 VNet to Azure-provided DNS..."
-$vnet = Get-AzVirtualNetwork -ResourceGroupName $rgName -Name 'dnsmig-spoke1-vnet'
+$vnet = Get-AzVirtualNetwork -ResourceGroupName $rgSpoke1 -Name "$Prefix-spoke1-vnet"
 $vnet.DhcpOptions.DnsServers = @()
 Set-AzVirtualNetwork -VirtualNetwork $vnet | Out-Null
 

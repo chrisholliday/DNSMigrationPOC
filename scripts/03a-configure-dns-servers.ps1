@@ -2,7 +2,8 @@ param(
     [string]$Prefix = 'dnsmig'
 )
 
-$rgName = "$Prefix-rg"
+$rgOnprem = "$Prefix-rg-onprem"
+$rgHub = "$Prefix-rg-hub"
 
 Write-Host '=================================================='
 Write-Host 'Configuring DNS Servers'
@@ -78,8 +79,8 @@ echo "Hub DNS configured"
 Write-Host "`nConfiguring On-Prem DNS Server..."
 Write-Host '  Installing dnsmasq and setting up zones...'
 $result = Invoke-AzVMRunCommand `
-    -ResourceGroupName $rgName `
-    -VMName 'dnsmig-onprem-dns' `
+    -ResourceGroupName $rgOnprem `
+    -VMName "$Prefix-onprem-vm-dns" `
     -CommandId 'RunShellScript' `
     -ScriptString $onpremDnsScript `
     -ErrorAction SilentlyContinue
@@ -96,8 +97,8 @@ else {
 Write-Host "`nConfiguring Hub DNS Server..."
 Write-Host '  Installing dnsmasq and setting up zones...'
 $result = Invoke-AzVMRunCommand `
-    -ResourceGroupName $rgName `
-    -VMName 'dnsmig-hub-dns' `
+    -ResourceGroupName $rgHub `
+    -VMName "$Prefix-hub-vm-dns" `
     -CommandId 'RunShellScript' `
     -ScriptString $hubDnsScript `
     -ErrorAction SilentlyContinue

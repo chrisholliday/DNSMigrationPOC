@@ -2,26 +2,27 @@ param(
     [string]$Prefix = 'dnsmig'
 )
 
-$rgName = "$Prefix-rg"
+$rgHub = "$Prefix-rg-hub"
+$rgSpoke2 = "$Prefix-rg-spoke2"
 
 Write-Host "=================================================="
 Write-Host "Phase 5: Migrate Spoke2 to Azure DNS"
 Write-Host "=================================================="
 
 Write-Host "\nLinking Spoke2 VNet to Private DNS zone..."
-$privateDnsZone = Get-AzPrivateDnsZone -ResourceGroupName $rgName -Name 'privatelink.blob.core.windows.net' -ErrorAction SilentlyContinue
+$privateDnsZone = Get-AzPrivateDnsZone -ResourceGroupName $rgHub -Name 'privatelink.blob.core.windows.net' -ErrorAction SilentlyContinue
 if (-not $privateDnsZone) {
     Write-Error "Private DNS Zone not found"
     exit 1
 }
 
-$vnetSpoke2 = Get-AzVirtualNetwork -ResourceGroupName $rgName -Name 'dnsmig-spoke2-vnet'
-$existingLink = Get-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $rgName -ZoneName 'privatelink.blob.core.windows.net' -Name "$Prefix-spoke2-link" -ErrorAction SilentlyContinue
+$vnetSpoke2 = Get-AzVirtualNetwork -ResourceGroupName $rgSpoke2 -Name "$Prefix-spoke2-vnet"
+$existingLink = Get-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $rgHub -ZoneName 'privatelink.blob.core.windows.net' -Name "$Prefix-spoke2-link" -ErrorAction SilentlyContinue
 
 if ($existingLink) {
     Write-Host "  ! Spoke2 VNet already linked"
 } else {
-    New-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $rgName -ZoneName 'privatelink.blob.core.windows.net' -Name "$Prefix-spoke2-link" -VirtualNetworkId $vnetSpoke2.Id | Out-Null
+    New-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $rgHub -ZoneName 'privatelink.blob.core.windows.net' -Name "$Prefix-spoke2-link" -VirtualNetworkId $vnetSpoke2.Id | Out-Null
     Write-Host "  ✓ Spoke2 VNet linked to Private DNS zone"
 }
 

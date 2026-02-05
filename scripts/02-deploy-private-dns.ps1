@@ -5,7 +5,9 @@ param(
 
 $root = Split-Path -Parent $PSScriptRoot
 $bicepFile = Join-Path $root 'bicep\private-dns.bicep'
-$rgName = "$Prefix-rg"
+$rgHub = "$Prefix-rg-hub"
+$rgSpoke1 = "$Prefix-rg-spoke1"
+$rgSpoke2 = "$Prefix-rg-spoke2"
 
 Write-Host '=================================================='
 Write-Host 'Phase 2: Deploy Azure Private DNS'
@@ -13,15 +15,20 @@ Write-Host '=================================================='
 
 Write-Host 'Deploying Azure Private DNS zone and resolver...'
 $deployParams = @{
-    ResourceGroupName       = $rgName
+    Location                = $Location
     TemplateFile            = $bicepFile
     TemplateParameterObject = @{
         location = $Location
         prefix   = $Prefix
+        rgNames  = @{
+            hub    = $rgHub
+            spoke1 = $rgSpoke1
+            spoke2 = $rgSpoke2
+        }
     }
 }
 
-$deployment = New-AzResourceGroupDeployment @deployParams
+$deployment = New-AzDeployment @deployParams
 
 if ($deployment.ProvisioningState -eq 'Succeeded') {
     Write-Host '✓ Phase 2 Complete: Azure Private DNS deployed'

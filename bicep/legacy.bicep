@@ -218,6 +218,7 @@ module peerHubToSpoke1 './modules/legacy-peering.bicep' = {
   dependsOn: [
     hub
     spoke1
+    peerHubToOnprem
   ]
   params: {
     localVnetName: names.hubVnet
@@ -254,6 +255,7 @@ module peerHubToSpoke2 './modules/legacy-peering.bicep' = {
   dependsOn: [
     hub
     spoke2
+    peerHubToSpoke1
   ]
   params: {
     localVnetName: names.hubVnet

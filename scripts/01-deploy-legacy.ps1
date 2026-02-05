@@ -2,92 +2,121 @@ param(
     [string]$Location = 'centralus',
     [string]$Prefix = 'dnsmig',
     [string]$AdminUsername = 'azureuser',
-    [Parameter(Mandatory = $true)][string]$SshPublicKeyPath
+    [Parameter(Mandatory = $true)][string]$SshPublicKeyPath,
+    [string]$OnpremRg,
+    [string]$HubRg,
+    [string]$Spoke1Rg,
+    [string]$Spoke2Rg
 )
 
 $root = Split-Path -Parent $PSScriptRoot
 $sshPublicKey = Get-Content -Path $SshPublicKeyPath -Raw
 
-$rgName = "$Prefix-rg"
+if (-not $OnpremRg) { $OnpremRg = "$Prefix-rg-onprem" }
+if (-not $HubRg) { $HubRg = "$Prefix-rg-hub" }
+if (-not $Spoke1Rg) { $Spoke1Rg = "$Prefix-rg-spoke1" }
+if (-not $Spoke2Rg) { $Spoke2Rg = "$Prefix-rg-spoke2" }
+
+$rgNames = @{
+    onprem = $OnpremRg
+    hub    = $HubRg
+    spoke1 = $Spoke1Rg
+    spoke2 = $Spoke2Rg
+}
 
 Write-Host '=================================================='
-Write-Host 'Phase 1: Create Networking Infrastructure'
+Write-Host 'Phase 1: Create Resource Groups'
 Write-Host '=================================================='
 
-# Create resource group
-Write-Host "Creating resource group: $rgName..."
-New-AzResourceGroup -Name $rgName -Location $Location -Force | Out-Null
+foreach ($rg in $rgNames.Values) {
+    Write-Host "Creating resource group: $rg..."
+    New-AzResourceGroup -Name $rg -Location $Location -Force | Out-Null
+}
 
-# Phase 1: Deploy VNets, Subnets, NSGs
-Write-Host 'Deploying VNets and subnets...'
-$bicepFile = Join-Path $root 'bicep\01-networking.bicep'
+Write-Host ''
+Write-Host '=================================================='
+Write-Host 'Phase 2: Deploy Legacy Environment (Multi-RG)'
+Write-Host '=================================================='
+
+Write-Host 'Deploying VNets, peerings, and VMs...'
+$bicepFile = Join-Path $root 'bicep\legacy.bicep'
 $deployParams = @{
-    ResourceGroupName       = $rgName
+    Location                = $Location
     TemplateFile            = $bicepFile
     TemplateParameterObject = @{
-        location = $Location
+        location      = $Location
+        prefix        = $Prefix
+        adminUsername = $AdminUsername
+        sshPublicKey  = $sshPublicKey
+        rgNames       = $rgNames
     }
 }
 
-$phase1 = New-AzResourceGroupDeployment @deployParams
-if (-not $phase1.ProvisioningState -eq 'Succeeded') {
-    Write-Error "Phase 1 deployment failed: $($phase1.ProvisioningState)"
+# Deploy with retry logic for transient Azure API errors
+$maxRetries = 3
+$retryCount = 0
+$deployment = $null
+
+do {
+    $retryCount++
+    try {
+        $deployment = New-AzDeployment @deployParams -ErrorAction Stop
+        break
+    }
+    catch {
+        $errorMessage = $_.Exception.Message
+        if ($errorMessage -match 'AnotherOperationInProgress' -and $retryCount -lt $maxRetries) {
+            Write-Host "  ⚠ Transient error: Another operation in progress. Retrying in 30 seconds (attempt $retryCount/$maxRetries)..."
+            Start-Sleep -Seconds 30
+        }
+        else {
+            Write-Error "Deployment failed: $errorMessage"
+            exit 1
+        }
+    }
+} while ($null -eq $deployment -and $retryCount -lt $maxRetries)
+
+if (-not $deployment.ProvisioningState -eq 'Succeeded') {
+    Write-Error "Deployment failed: $($deployment.ProvisioningState)"
     exit 1
 }
 
-Write-Host '✓ Phase 1 Complete: VNets and subnets deployed'
+Write-Host '✓ Phase 2 Complete: Legacy environment deployed'
 Write-Host ''
 
 # Validation 1: Check all VNets exist
 Write-Host 'Validating VNets...'
-$expectedVnets = 'dnsmig-onprem-vnet', 'dnsmig-hub-vnet', 'dnsmig-spoke1-vnet', 'dnsmig-spoke2-vnet'
-foreach ($vnet in $expectedVnets) {
-    $v = Get-AzVirtualNetwork -ResourceGroupName $rgName -Name $vnet -ErrorAction SilentlyContinue
+$expectedVnets = @(
+    @{ rg = $OnpremRg; vnet = "$Prefix-onprem-vnet" }
+    @{ rg = $HubRg; vnet = "$Prefix-hub-vnet" }
+    @{ rg = $Spoke1Rg; vnet = "$Prefix-spoke1-vnet" }
+    @{ rg = $Spoke2Rg; vnet = "$Prefix-spoke2-vnet" }
+)
+
+foreach ($entry in $expectedVnets) {
+    $v = Get-AzVirtualNetwork -ResourceGroupName $entry.rg -Name $entry.vnet -ErrorAction SilentlyContinue
     if ($v) {
-        Write-Host "  ✓ $vnet exists"
+        Write-Host "  ✓ $($entry.vnet) exists in $($entry.rg)"
     }
     else {
-        Write-Error "  ✗ $vnet NOT FOUND"
+        Write-Error "  ✗ $($entry.vnet) NOT FOUND in $($entry.rg)"
         exit 1
     }
 }
 
-Write-Host ''
-Write-Host '=================================================='
-Write-Host 'Phase 2: Create VNet Peerings'
-Write-Host '=================================================='
-
-# Phase 2: Deploy Peerings
-Write-Host 'Creating VNet peerings...'
-$bicepFile = Join-Path $root 'bicep\02-peering.bicep'
-$deployParams = @{
-    ResourceGroupName = $rgName
-    TemplateFile      = $bicepFile
-
-}
-
-$phase2 = New-AzResourceGroupDeployment @deployParams
-if (-not $phase2.ProvisioningState -eq 'Succeeded') {
-    Write-Error "Phase 2 deployment failed: $($phase2.ProvisioningState)"
-    exit 1
-}
-
-Write-Host '✓ Phase 2 Complete: VNet peerings created'
-Write-Host ''
-
 # Validation 2: Check all peerings are active
 Write-Host 'Validating peerings...'
 $expectedPeerings = @(
-    @{ vnet = 'dnsmig-onprem-vnet'; peering = 'dnsmig-onprem-to-hub' }
-    @{ vnet = 'dnsmig-hub-vnet'; peering = 'dnsmig-hub-to-onprem' }
-    @{ vnet = 'dnsmig-hub-vnet'; peering = 'dnsmig-hub-to-spoke1' }
-    @{ vnet = 'dnsmig-spoke1-vnet'; peering = 'dnsmig-spoke1-to-hub' }
-    @{ vnet = 'dnsmig-hub-vnet'; peering = 'dnsmig-hub-to-spoke2' }
-    @{ vnet = 'dnsmig-spoke2-vnet'; peering = 'dnsmig-spoke2-to-hub' }
+    @{ rg = $OnpremRg; vnet = "$Prefix-onprem-vnet"; peering = 'peer-onprem-to-hub' }
+    @{ rg = $HubRg; vnet = "$Prefix-hub-vnet"; peering = 'peer-hub-to-onprem' }
+    @{ rg = $HubRg; vnet = "$Prefix-hub-vnet"; peering = 'peer-hub-to-spoke1' }
+    @{ rg = $Spoke1Rg; vnet = "$Prefix-spoke1-vnet"; peering = 'peer-spoke1-to-hub' }
+    @{ rg = $HubRg; vnet = "$Prefix-hub-vnet"; peering = 'peer-hub-to-spoke2' }
+    @{ rg = $Spoke2Rg; vnet = "$Prefix-spoke2-vnet"; peering = 'peer-spoke2-to-hub' }
 )
 
 foreach ($peer in $expectedPeerings) {
-    $p = Get-AzVirtualNetworkPeering -ResourceGroupName $rgName -VirtualNetworkName $peer.vnet -Name $peer.peering -ErrorAction SilentlyContinue
+    $p = Get-AzVirtualNetworkPeering -ResourceGroupName $peer.rg -VirtualNetworkName $peer.vnet -Name $peer.peering -ErrorAction SilentlyContinue
     if ($p -and $p.PeeringState -eq 'Connected') {
         Write-Host "  ✓ $($peer.vnet) -> $($peer.peering) is Connected"
     }
@@ -97,45 +126,27 @@ foreach ($peer in $expectedPeerings) {
 }
 
 Write-Host ''
-Write-Host '=================================================='
-Write-Host 'Phase 3: Deploy Virtual Machines'
-Write-Host '=================================================='
-
-# Phase 3: Deploy VMs
-Write-Host 'Deploying VMs and cloud-init scripts...'
-$bicepFile = Join-Path $root 'bicep\03-vms.bicep'
-$deployParams = @{
-    ResourceGroupName       = $rgName
-    TemplateFile            = $bicepFile
-    TemplateParameterObject = @{
-        location      = $Location
-        adminUsername = $AdminUsername
-        sshPublicKey  = $sshPublicKey
-    }
-}
-
-$phase3 = New-AzResourceGroupDeployment @deployParams
-if (-not $phase3.ProvisioningState -eq 'Succeeded') {
-    Write-Error "Phase 3 deployment failed: $($phase3.ProvisioningState)"
-    exit 1
-}
-
-Write-Host '✓ Phase 3 Complete: VMs deployed'
-Write-Host ''
 
 # Validation 3: Check all VMs exist and provisioned
 Write-Host 'Validating VMs...'
-$expectedVms = 'dnsmig-onprem-dns', 'dnsmig-onprem-client', 'dnsmig-hub-dns', 'dnsmig-spoke1-app', 'dnsmig-spoke2-app'
-foreach ($vmName in $expectedVms) {
-    $vm = Get-AzVM -ResourceGroupName $rgName -Name $vmName -ErrorAction SilentlyContinue
+$expectedVms = @(
+    @{ rg = $OnpremRg; vm = "$Prefix-onprem-vm-dns" }
+    @{ rg = $OnpremRg; vm = "$Prefix-onprem-vm-client" }
+    @{ rg = $HubRg; vm = "$Prefix-hub-vm-dns" }
+    @{ rg = $Spoke1Rg; vm = "$Prefix-spoke1-vm-app" }
+    @{ rg = $Spoke2Rg; vm = "$Prefix-spoke2-vm-app" }
+)
+
+foreach ($entry in $expectedVms) {
+    $vm = Get-AzVM -ResourceGroupName $entry.rg -Name $entry.vm -ErrorAction SilentlyContinue
     if ($vm -and $vm.ProvisioningState -eq 'Succeeded') {
-        Write-Host "  ✓ $vmName provisioned successfully"
+        Write-Host "  ✓ $($entry.vm) provisioned successfully"
     }
     elseif ($vm) {
-        Write-Host "  ! $vmName state: $($vm.ProvisioningState)"
+        Write-Host "  ! $($entry.vm) state: $($vm.ProvisioningState)"
     }
     else {
-        Write-Error "  ✗ $vmName NOT FOUND"
+        Write-Error "  ✗ $($entry.vm) NOT FOUND in $($entry.rg)"
         exit 1
     }
 }
@@ -147,7 +158,7 @@ Write-Host '=================================================='
 Write-Host ''
 Write-Host 'All VNets, peerings, and VMs have been deployed.'
 Write-Host ''
-Write-Host "Resource Group: $rgName"
+Write-Host "Resource Groups: $OnpremRg, $HubRg, $Spoke1Rg, $Spoke2Rg"
 Write-Host "Location: $Location"
 Write-Host ''
 Write-Host 'Next steps:'

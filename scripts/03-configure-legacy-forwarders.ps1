@@ -2,7 +2,8 @@ param(
     [string]$Prefix = 'dnsmig'
 )
 
-$rgName = "$Prefix-rg"
+$rgOnprem = "$Prefix-rg-onprem"
+$rgHub = "$Prefix-rg-hub"
 
 Write-Host "=================================================="
 Write-Host "Phase 3: Configure Legacy Forwarders"
@@ -10,19 +11,19 @@ Write-Host "=================================================="
 
 # Get inbound resolver IP from Private Resolver
 Write-Host "\nRetrieving Private Resolver inbound endpoint IP..."
-$resolver = Get-AzResource -ResourceGroupName $rgName -ResourceType 'Microsoft.Network/dnsResolvers' -ErrorAction SilentlyContinue
+$resolver = Get-AzResource -ResourceGroupName $rgHub -ResourceType 'Microsoft.Network/dnsResolvers' -ErrorAction SilentlyContinue
 if (-not $resolver) {
-    Write-Error "DNS Resolver not found in $rgName"
+    Write-Error "DNS Resolver not found in $rgHub"
     exit 1
 }
 
-$inboundEndpoint = Get-AzResource -ResourceGroupName $rgName -ResourceType 'Microsoft.Network/dnsResolvers/inboundEndpoints' -ErrorAction SilentlyContinue
+$inboundEndpoint = Get-AzResource -ResourceGroupName $rgHub -ResourceType 'Microsoft.Network/dnsResolvers/inboundEndpoints' -ErrorAction SilentlyContinue
 if (-not $inboundEndpoint) {
     Write-Error "Inbound endpoint not found"
     exit 1
 }
 
-$inboundNic = Get-AzNetworkInterface -ResourceGroupName $rgName -Name "$Prefix-resolver-inbound-nic" -ErrorAction SilentlyContinue
+$inboundNic = Get-AzNetworkInterface -ResourceGroupName $rgHub -Name "$Prefix-resolver-inbound-nic" -ErrorAction SilentlyContinue
 if (-not $inboundNic) {
     Write-Host "  ! Inbound NIC not found, using default IP 10.20.2.4"
     $InboundResolverIp = '10.20.2.4'
@@ -50,8 +51,8 @@ echo "Forwarder configured for privatelink.blob.core.windows.net → $InboundRes
 
 Write-Host "\nUpdating on-prem DNS forwarder..."
 $result = Invoke-AzVMRunCommand `
-    -ResourceGroupName $rgName `
-    -VMName 'dnsmig-onprem-dns' `
+    -ResourceGroupName $rgOnprem `
+    -VMName "$Prefix-onprem-vm-dns" `
     -CommandId 'RunShellScript' `
     -ScriptString $updateScript `
     -ErrorAction SilentlyContinue
@@ -64,8 +65,8 @@ if ($result.Value[0].Message -match 'Forwarder configured') {
 
 Write-Host "\nUpdating hub DNS forwarder..."
 $result = Invoke-AzVMRunCommand `
-    -ResourceGroupName $rgName `
-    -VMName 'dnsmig-hub-dns' `
+    -ResourceGroupName $rgHub `
+    -VMName "$Prefix-hub-vm-dns" `
     -CommandId 'RunShellScript' `
     -ScriptString $updateScript `
     -ErrorAction SilentlyContinue

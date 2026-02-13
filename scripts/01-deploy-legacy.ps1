@@ -10,7 +10,18 @@ param(
 )
 
 $root = Split-Path -Parent $PSScriptRoot
+
+if (-not (Test-Path $SshPublicKeyPath)) {
+    Write-Error "SSH public key file not found: $SshPublicKeyPath"
+    exit 1
+}
+
 $sshPublicKey = Get-Content -Path $SshPublicKeyPath -Raw
+
+if (-not $sshPublicKey) {
+    Write-Error "SSH public key file is empty: $SshPublicKeyPath"
+    exit 1
+}
 
 if (-not $OnpremRg) { $OnpremRg = "$Prefix-rg-onprem" }
 if (-not $HubRg) { $HubRg = "$Prefix-rg-hub" }
@@ -53,9 +64,10 @@ $deployParams = @{
 }
 
 # Deploy with retry logic for transient Azure API errors
-$maxRetries = 3
+$maxRetries = 5
 $retryCount = 0
 $deployment = $null
+$retryDelaySeconds = 60
 
 do {
     $retryCount++
@@ -66,8 +78,15 @@ do {
     catch {
         $errorMessage = $_.Exception.Message
         if ($errorMessage -match 'AnotherOperationInProgress' -and $retryCount -lt $maxRetries) {
-            Write-Host "  ⚠ Transient error: Another operation in progress. Retrying in 30 seconds (attempt $retryCount/$maxRetries)..."
-            Start-Sleep -Seconds 30
+            Write-Host "  ⚠ Transient error: Another operation in progress. Retrying in $retryDelaySeconds seconds (attempt $retryCount/$maxRetries)..."
+            Start-Sleep -Seconds $retryDelaySeconds
+        }
+        elseif ($errorMessage -match 'InUseSubnetCannotBeDeleted') {
+            Write-Error 'Deployment failed: Resources from a previous deployment exist and are blocking this deployment.'
+            Write-Host ''
+            Write-Host 'To clean up existing resources, run: ./scripts/teardown.ps1'
+            Write-Host 'Then retry this deployment script.'
+            exit 1
         }
         else {
             Write-Error "Deployment failed: $errorMessage"
@@ -76,7 +95,12 @@ do {
     }
 } while ($null -eq $deployment -and $retryCount -lt $maxRetries)
 
-if (-not $deployment.ProvisioningState -eq 'Succeeded') {
+if ($null -eq $deployment) {
+    Write-Error "Deployment failed after $maxRetries attempts"
+    exit 1
+}
+
+if ($deployment.ProvisioningState -ne 'Succeeded') {
     Write-Error "Deployment failed: $($deployment.ProvisioningState)"
     exit 1
 }
@@ -120,8 +144,13 @@ foreach ($peer in $expectedPeerings) {
     if ($p -and $p.PeeringState -eq 'Connected') {
         Write-Host "  ✓ $($peer.vnet) -> $($peer.peering) is Connected"
     }
+    elseif ($p) {
+        Write-Error "  ✗ $($peer.vnet) -> $($peer.peering) state: $($p.PeeringState) (expected Connected)"
+        exit 1
+    }
     else {
-        Write-Host "  ! $($peer.vnet) -> $($peer.peering) state: $($p.PeeringState)"
+        Write-Error "  ✗ $($peer.vnet) -> $($peer.peering) NOT FOUND"
+        exit 1
     }
 }
 

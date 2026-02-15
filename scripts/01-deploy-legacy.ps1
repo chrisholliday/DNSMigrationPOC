@@ -191,5 +191,6 @@ Write-Host "Resource Groups: $OnpremRg, $HubRg, $Spoke1Rg, $Spoke2Rg"
 Write-Host "Location: $Location"
 Write-Host ''
 Write-Host 'Next steps:'
-Write-Host '  1. Verify DNS resolution with: ./scripts/validate.ps1 -Phase Legacy'
-Write-Host '  2. Deploy Private DNS with: ./scripts/02-deploy-private-dns.ps1'
+Write-Host '  1. Configure DNS servers with: ./scripts/02-configure-dns-servers.ps1'
+Write-Host '  2. Verify DNS resolution with: ./scripts/validate.ps1 -Phase Legacy'
+Write-Host '  3. Deploy Private DNS with: ./scripts/03-deploy-private-dns.ps1'

@@ -55,7 +55,7 @@ Script: [scripts/01-deploy-legacy.ps1](scripts/01-deploy-legacy.ps1)
 
 Install and configure dnsmasq on the DNS VMs to serve the zones.
 
-Script: [scripts/03a-configure-dns-servers.ps1](scripts/03a-configure-dns-servers.ps1)
+Script: [scripts/02-configure-dns-servers.ps1](scripts/02-configure-dns-servers.ps1)
 
 ### Phase 2 — Azure Private DNS + Resolver
 
@@ -63,25 +63,25 @@ Script: [scripts/03a-configure-dns-servers.ps1](scripts/03a-configure-dns-server
 - Create DNS Resolver inbound/outbound endpoints and a forwarding ruleset.
 - Deploy storage accounts + private endpoints with DNS Zone Groups (auto‑creates records).
 
-Script: [scripts/02-deploy-private-dns.ps1](scripts/02-deploy-private-dns.ps1)
+Script: [scripts/03-deploy-private-dns.ps1](scripts/03-deploy-private-dns.ps1)
 
 ### Phase 3 — Update Legacy Forwarders
 
 Switch legacy DNS servers to forward `privatelink.blob.core.windows.net` to the Private Resolver inbound endpoint.
 
-Script: [scripts/03-configure-legacy-forwarders.ps1](scripts/03-configure-legacy-forwarders.ps1)
+Script: [scripts/04-configure-legacy-forwarders.ps1](scripts/04-configure-legacy-forwarders.ps1)
 
 ### Phase 4 — Migrate Spoke1
 
 Switch Spoke1 VNet to Azure‑provided DNS (keeps Spoke2 on the hub DNS VM).
 
-Script: [scripts/04-migrate-spoke1.ps1](scripts/04-migrate-spoke1.ps1)
+Script: [scripts/05-migrate-spoke1.ps1](scripts/05-migrate-spoke1.ps1)
 
 ### Phase 5 — Migrate Spoke2
 
 Link Spoke2 to the private DNS zone (if not already) and switch it to Azure‑provided DNS.
 
-Script: [scripts/05-migrate-spoke2.ps1](scripts/05-migrate-spoke2.ps1)
+Script: [scripts/06-migrate-spoke2.ps1](scripts/06-migrate-spoke2.ps1)
 
 ## Validation
 

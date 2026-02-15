@@ -45,4 +45,4 @@ else {
 }
 
 Write-Host ''
-Write-Host "Next: Configure legacy DNS forwarders with './scripts/03-configure-legacy-forwarders.ps1'"
+Write-Host "Next: Configure legacy DNS forwarders with './scripts/04-configure-legacy-forwarders.ps1'"

@@ -11,6 +11,33 @@ param(
 
 $root = Split-Path -Parent $PSScriptRoot
 
+# Check if user is logged in to Azure
+$context = Get-AzContext
+if (-not $context) {
+    Write-Host 'You are not logged in to Azure. Connecting now...'
+    Connect-AzAccount
+    $context = Get-AzContext
+    if (-not $context) {
+        Write-Error 'Failed to connect to Azure'
+        exit 1
+    }
+}
+
+Write-Host "Connected to Azure subscription: $($context.Subscription.Name) ($($context.Subscription.Id))"
+Write-Host ''
+
+# Check if bicep is installed
+try {
+    $bicepVersion = bicep --version 2>$null
+    Write-Host "Bicep is installed: $bicepVersion"
+}
+catch {
+    Write-Error 'Bicep CLI is not installed or not in PATH. Please install bicep: https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/install'
+    exit 1
+}
+
+Write-Host ''
+
 if (-not (Test-Path $SshPublicKeyPath)) {
     Write-Error "SSH public key file not found: $SshPublicKeyPath"
     exit 1

@@ -128,6 +128,112 @@ resource spokeNsg 'Microsoft.Network/networkSecurityGroups@2023-09-01' = {
   }
 }
 
+// Public IPs for NAT Gateways
+resource onpremNatGatewayPublicIp 'Microsoft.Network/publicIPAddresses@2023-09-01' = {
+  name: 'dnsmig-onprem-nat-pip'
+  location: location
+  sku: {
+    name: 'Standard'
+  }
+  properties: {
+    publicIPAllocationMethod: 'Static'
+  }
+}
+
+resource hubNatGatewayPublicIp 'Microsoft.Network/publicIPAddresses@2023-09-01' = {
+  name: 'dnsmig-hub-nat-pip'
+  location: location
+  sku: {
+    name: 'Standard'
+  }
+  properties: {
+    publicIPAllocationMethod: 'Static'
+  }
+}
+
+// NAT Gateways
+resource onpremNatGateway 'Microsoft.Network/natGateways@2023-09-01' = {
+  name: 'dnsmig-onprem-nat'
+  location: location
+  sku: {
+    name: 'Standard'
+  }
+  properties: {
+    publicIpAddresses: [
+      {
+        id: onpremNatGatewayPublicIp.id
+      }
+    ]
+  }
+}
+
+resource hubNatGateway 'Microsoft.Network/natGateways@2023-09-01' = {
+  name: 'dnsmig-hub-nat'
+  location: location
+  sku: {
+    name: 'Standard'
+  }
+  properties: {
+    publicIpAddresses: [
+      {
+        id: hubNatGatewayPublicIp.id
+      }
+    ]
+  }
+}
+
+resource spoke1NatGatewayPublicIp 'Microsoft.Network/publicIPAddresses@2023-09-01' = {
+  name: 'dnsmig-spoke1-nat-pip'
+  location: location
+  sku: {
+    name: 'Standard'
+  }
+  properties: {
+    publicIPAllocationMethod: 'Static'
+  }
+}
+
+resource spoke1NatGateway 'Microsoft.Network/natGateways@2023-09-01' = {
+  name: 'dnsmig-spoke1-nat'
+  location: location
+  sku: {
+    name: 'Standard'
+  }
+  properties: {
+    publicIpAddresses: [
+      {
+        id: spoke1NatGatewayPublicIp.id
+      }
+    ]
+  }
+}
+
+resource spoke2NatGatewayPublicIp 'Microsoft.Network/publicIPAddresses@2023-09-01' = {
+  name: 'dnsmig-spoke2-nat-pip'
+  location: location
+  sku: {
+    name: 'Standard'
+  }
+  properties: {
+    publicIPAllocationMethod: 'Static'
+  }
+}
+
+resource spoke2NatGateway 'Microsoft.Network/natGateways@2023-09-01' = {
+  name: 'dnsmig-spoke2-nat'
+  location: location
+  sku: {
+    name: 'Standard'
+  }
+  properties: {
+    publicIpAddresses: [
+      {
+        id: spoke2NatGatewayPublicIp.id
+      }
+    ]
+  }
+}
+
 // VNets
 resource onpremVnet 'Microsoft.Network/virtualNetworks@2023-09-01' = {
   name: onpremVnetName
@@ -145,6 +251,9 @@ resource onpremVnet 'Microsoft.Network/virtualNetworks@2023-09-01' = {
           addressPrefix: onpremSubnetPrefix
           networkSecurityGroup: {
             id: onpremNsg.id
+          }
+          natGateway: {
+            id: onpremNatGateway.id
           }
         }
       }
@@ -168,6 +277,9 @@ resource hubVnet 'Microsoft.Network/virtualNetworks@2023-09-01' = {
           addressPrefix: hubSubnetVmPrefix
           networkSecurityGroup: {
             id: hubNsg.id
+          }
+          natGateway: {
+            id: hubNatGateway.id
           }
         }
       }
@@ -226,6 +338,9 @@ resource spoke1Vnet 'Microsoft.Network/virtualNetworks@2023-09-01' = {
           networkSecurityGroup: {
             id: spokeNsg.id
           }
+          natGateway: {
+            id: spoke1NatGateway.id
+          }
         }
       }
       {
@@ -255,6 +370,9 @@ resource spoke2Vnet 'Microsoft.Network/virtualNetworks@2023-09-01' = {
         name: 'dnsmig-spoke2-vm-subnet'
         properties: {
           addressPrefix: spoke2SubnetVmPrefix
+          natGateway: {
+            id: spoke2NatGateway.id
+          }
           networkSecurityGroup: {
             id: spokeNsg.id
           }

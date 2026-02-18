@@ -13,13 +13,13 @@ Write-Host "=================================================="
 Write-Host "\nRetrieving Private Resolver inbound endpoint IP..."
 $resolver = Get-AzResource -ResourceGroupName $rgHub -ResourceType 'Microsoft.Network/dnsResolvers' -ErrorAction SilentlyContinue
 if (-not $resolver) {
-    Write-Error "DNS Resolver not found in $rgHub"
+    Write-Error "DNS Resolver not found in $rgHub. Please run 03-deploy-private-dns.ps1 first."
     exit 1
 }
 
 $inboundEndpoint = Get-AzResource -ResourceGroupName $rgHub -ResourceType 'Microsoft.Network/dnsResolvers/inboundEndpoints' -ErrorAction SilentlyContinue
 if (-not $inboundEndpoint) {
-    Write-Error "Inbound endpoint not found"
+    Write-Error "Inbound endpoint not found. DNS Resolver deployment may be incomplete."
     exit 1
 }
 
@@ -50,31 +50,43 @@ echo "Forwarder configured for privatelink.blob.core.windows.net → $InboundRes
 "@
 
 Write-Host "\nUpdating on-prem DNS forwarder..."
-$result = Invoke-AzVMRunCommand `
-    -ResourceGroupName $rgOnprem `
-    -VMName "$Prefix-onprem-vm-dns" `
-    -CommandId 'RunShellScript' `
-    -ScriptString $updateScript `
-    -ErrorAction SilentlyContinue
+try {
+    $result = Invoke-AzVMRunCommand `
+        -ResourceGroupName $rgOnprem `
+        -VMName "$Prefix-onprem-vm-dns" `
+        -CommandId 'RunShellScript' `
+        -ScriptString $updateScript `
+        -ErrorAction Stop `
+        -WarningAction SilentlyContinue
 
-if ($result.Value[0].Message -match 'Forwarder configured') {
-    Write-Host "  ✓ On-prem forwarder updated"
-} else {
-    Write-Host "  ! Status: $($result.Value[0].Message | Select-Object -First 100)"
+    if ($result.Value[0].Message -match 'Forwarder configured') {
+        Write-Host "  ✓ On-prem forwarder updated"
+    } else {
+        Write-Host "  ! Status: $($result.Value[0].Message | Select-Object -First 100)"
+    }
+} catch {
+    Write-Host "  ✗ Error updating on-prem forwarder: $_" -ForegroundColor Red
+    exit 1
 }
 
 Write-Host "\nUpdating hub DNS forwarder..."
-$result = Invoke-AzVMRunCommand `
-    -ResourceGroupName $rgHub `
-    -VMName "$Prefix-hub-vm-dns" `
-    -CommandId 'RunShellScript' `
-    -ScriptString $updateScript `
-    -ErrorAction SilentlyContinue
+try {
+    $result = Invoke-AzVMRunCommand `
+        -ResourceGroupName $rgHub `
+        -VMName "$Prefix-hub-vm-dns" `
+        -CommandId 'RunShellScript' `
+        -ScriptString $updateScript `
+        -ErrorAction Stop `
+        -WarningAction SilentlyContinue
 
-if ($result.Value[0].Message -match 'Forwarder configured') {
-    Write-Host "  ✓ Hub forwarder updated"
-} else {
-    Write-Host "  ! Status: $($result.Value[0].Message | Select-Object -First 100)"
+    if ($result.Value[0].Message -match 'Forwarder configured') {
+        Write-Host "  ✓ Hub forwarder updated"
+    } else {
+        Write-Host "  ! Status: $($result.Value[0].Message | Select-Object -First 100)"
+    }
+} catch {
+    Write-Host "  ✗ Error updating hub forwarder: $_" -ForegroundColor Red
+    exit 1
 }
 
 Write-Host ""

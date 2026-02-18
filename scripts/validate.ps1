@@ -47,7 +47,7 @@ function Invoke-RunCmd {
     $wrappedScript = @"
 set -o pipefail
 $Script
-echo "__EXIT_CODE__:$?"
+__COMMAND_EXIT_CODE__:$?
 "@
 
     try {
@@ -55,22 +55,31 @@ echo "__EXIT_CODE__:$?"
         $message = ($result.Value[0].Message | Out-String).Trim()
         $exitCode = $null
 
-        if ($message -match '__EXIT_CODE__:(\d+)') {
+        if ($message -match '__COMMAND_EXIT_CODE__:(\d+)') {
             $exitCode = [int]$Matches[1]
         }
 
-        $cleanMessage = ($message -replace '__EXIT_CODE__:\d+', '').Trim()
+        $cleanMessage = ($message -replace '__COMMAND_EXIT_CODE__:\d+', '').Trim()
 
-        if ($exitCode -eq 0 -or $null -eq $exitCode) {
-            Write-Host "  ✓ $VmName passed"
-            return [pscustomobject]@{ Vm = $VmName; Success = $true; Details = $cleanMessage }
+        # Explicit failure detection
+        if ($null -eq $exitCode) {
+            Write-Host "    ✗ Failed to extract exit code from output" -ForegroundColor Red
+            Write-Host "    Output: $message" -ForegroundColor Red
+            return [pscustomobject]@{ Vm = $VmName; Success = $false; Details = "Could not determine exit code: $message" }
         }
 
-        Write-Host "  ! $VmName failed (exit $exitCode)" -ForegroundColor Yellow
-        return [pscustomobject]@{ Vm = $VmName; Success = $false; Details = $cleanMessage }
+        if ($exitCode -ne 0) {
+            Write-Host "    ✗ Command failed with exit code $exitCode" -ForegroundColor Red
+            Write-Host "    Details:" -ForegroundColor Red
+            $cleanMessage -split "`n" | ForEach-Object { Write-Host "      $_" -ForegroundColor Red }
+            return [pscustomobject]@{ Vm = $VmName; Success = $false; Details = $cleanMessage }
+        }
+
+        Write-Host "    ✓ Passed"
+        return [pscustomobject]@{ Vm = $VmName; Success = $true; Details = $cleanMessage }
     }
     catch {
-        Write-Host "  ! $VmName failed to run command. $_" -ForegroundColor Yellow
+        Write-Host "    ✗ Exception while running command: $_" -ForegroundColor Red
         return [pscustomobject]@{ Vm = $VmName; Success = $false; Details = $_.Exception.Message }
     }
 }
@@ -224,22 +233,26 @@ $dnsResults += Invoke-RunCmd -ResourceGroup $rgSpoke2 -VmName $spoke2Vm -Script 
 $dnsFailures = $dnsResults | Where-Object { -not $_.Success }
 if ($dnsFailures.Count -gt 0) {
     Write-Host ''
-    Write-Host 'DNS resolution failures detected:' -ForegroundColor Yellow
-    foreach ($failure in $dnsFailures) {
-        Write-Host "  - $($failure.Vm)"
-        if ($failure.Details) {
-            Write-Host "    $($failure.Details)"
+    Write-Host 'DNS resolution failures detected:' -ForegroundColor Red
+    $dnsFailures | ForEach-Object {
+        Write-Host "  ✗ $($_.Vm)" -ForegroundColor Red
+        if ($_.Details) {
+            $_.Details -split "`n" | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
         }
 
-        if ($failure.Vm -in @($onpremDnsVm, $hubDnsVm)) {
-            Write-Host "    Diagnostics for $($failure.Vm):"
-            $diag = Get-DnsDiagnostics -ResourceGroup ($failure.Vm -eq $onpremDnsVm ? $rgOnprem : $rgHub) -VmName $failure.Vm
-            Write-Host $diag
+        if ($_.Vm -in @($onpremDnsVm, $hubDnsVm)) {
+            Write-Host "    Running detailed diagnostics:" -ForegroundColor Red
+            $diag = Get-DnsDiagnostics -ResourceGroup ($_.Vm -eq $onpremDnsVm ? $rgOnprem : $rgHub) -VmName $_.Vm
+            $diag -split "`n" | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
         }
     }
+    Write-Host ''
+    Write-Host '❌ Validation FAILED - DNS is not properly configured' -ForegroundColor Red
+    exit 1
 }
 else {
-    Write-Host '  ✓ DNS resolution succeeded on all VMs.'
+    Write-Host ''
+    Write-Host '✓ DNS resolution succeeded on all VMs.'
 }
 
 if ($Phase -in @('AfterPrivateDns', 'AfterForwarders', 'AfterSpoke1', 'AfterSpoke2')) {

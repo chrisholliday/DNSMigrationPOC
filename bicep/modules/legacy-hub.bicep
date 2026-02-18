@@ -24,6 +24,33 @@ var privatelinkZone = 'privatelink.blob.${environment().suffixes.storage}'
 var nsgName = '${prefix}-hub-nsg'
 var dnsVmName = '${prefix}-hub-vm-dns'
 
+// NAT Gateway resources
+resource hubNatGatewayPublicIp 'Microsoft.Network/publicIPAddresses@2023-09-01' = {
+  name: '${prefix}-hub-nat-pip'
+  location: location
+  sku: {
+    name: 'Standard'
+  }
+  properties: {
+    publicIPAllocationMethod: 'Static'
+  }
+}
+
+resource hubNatGateway 'Microsoft.Network/natGateways@2023-09-01' = {
+  name: '${prefix}-hub-nat'
+  location: location
+  sku: {
+    name: 'Standard'
+  }
+  properties: {
+    publicIpAddresses: [
+      {
+        id: hubNatGatewayPublicIp.id
+      }
+    ]
+  }
+}
+
 resource hubNsg 'Microsoft.Network/networkSecurityGroups@2023-09-01' = {
   name: nsgName
   location: location
@@ -60,46 +87,45 @@ resource hubVnet 'Microsoft.Network/virtualNetworks@2023-09-01' = {
         dnsIps.dns
       ]
     }
-  }
-}
-
-resource hubSubnetVm 'Microsoft.Network/virtualNetworks/subnets@2023-09-01' = {
-  parent: hubVnet
-  name: 'snet-vm'
-  properties: {
-    addressPrefix: subnetVmPrefix
-    networkSecurityGroup: {
-      id: hubNsg.id
-    }
-  }
-}
-
-resource hubSubnetInbound 'Microsoft.Network/virtualNetworks/subnets@2023-09-01' = {
-  parent: hubVnet
-  name: 'snet-dns-inbound'
-  properties: {
-    addressPrefix: subnetInboundPrefix
-    delegations: [
+    subnets: [
       {
-        name: 'dnsResolverDelegation'
+        name: 'snet-vm'
         properties: {
-          serviceName: 'Microsoft.Network/dnsResolvers'
+          addressPrefix: subnetVmPrefix
+          networkSecurityGroup: {
+            id: hubNsg.id
+          }
+          natGateway: {
+            id: hubNatGateway.id
+          }
         }
       }
-    ]
-  }
-}
-
-resource hubSubnetOutbound 'Microsoft.Network/virtualNetworks/subnets@2023-09-01' = {
-  parent: hubVnet
-  name: 'snet-dns-outbound'
-  properties: {
-    addressPrefix: subnetOutboundPrefix
-    delegations: [
       {
-        name: 'dnsResolverDelegation'
+        name: 'snet-dns-inbound'
         properties: {
-          serviceName: 'Microsoft.Network/dnsResolvers'
+          addressPrefix: subnetInboundPrefix
+          delegations: [
+            {
+              name: 'dnsResolverDelegation'
+              properties: {
+                serviceName: 'Microsoft.Network/dnsResolvers'
+              }
+            }
+          ]
+        }
+      }
+      {
+        name: 'snet-dns-outbound'
+        properties: {
+          addressPrefix: subnetOutboundPrefix
+          delegations: [
+            {
+              name: 'dnsResolverDelegation'
+              properties: {
+                serviceName: 'Microsoft.Network/dnsResolvers'
+              }
+            }
+          ]
         }
       }
     ]
@@ -117,7 +143,7 @@ resource dnsNic 'Microsoft.Network/networkInterfaces@2023-09-01' = {
           privateIPAllocationMethod: 'Static'
           privateIPAddress: dnsIps.dns
           subnet: {
-            id: hubSubnetVm.id
+            id: '${hubVnet.id}/subnets/snet-vm'
           }
         }
       }

@@ -23,6 +23,33 @@ var nsgName = '${prefix}-onprem-nsg'
 var dnsVmName = '${prefix}-onprem-vm-dns'
 var clientVmName = '${prefix}-onprem-vm-client'
 
+// NAT Gateway resources
+resource onpremNatGatewayPublicIp 'Microsoft.Network/publicIPAddresses@2023-09-01' = {
+  name: '${prefix}-onprem-nat-pip'
+  location: location
+  sku: {
+    name: 'Standard'
+  }
+  properties: {
+    publicIPAllocationMethod: 'Static'
+  }
+}
+
+resource onpremNatGateway 'Microsoft.Network/natGateways@2023-09-01' = {
+  name: '${prefix}-onprem-nat'
+  location: location
+  sku: {
+    name: 'Standard'
+  }
+  properties: {
+    publicIpAddresses: [
+      {
+        id: onpremNatGatewayPublicIp.id
+      }
+    ]
+  }
+}
+
 resource onpremNsg 'Microsoft.Network/networkSecurityGroups@2023-09-01' = {
   name: nsgName
   location: location
@@ -59,17 +86,20 @@ resource onpremVnet 'Microsoft.Network/virtualNetworks@2023-09-01' = {
         dnsIps.dns
       ]
     }
-  }
-}
-
-resource onpremSubnetVm 'Microsoft.Network/virtualNetworks/subnets@2023-09-01' = {
-  parent: onpremVnet
-  name: 'snet-vm'
-  properties: {
-    addressPrefix: subnetPrefix
-    networkSecurityGroup: {
-      id: onpremNsg.id
-    }
+    subnets: [
+      {
+        name: 'snet-vm'
+        properties: {
+          addressPrefix: subnetPrefix
+          networkSecurityGroup: {
+            id: onpremNsg.id
+          }
+          natGateway: {
+            id: onpremNatGateway.id
+          }
+        }
+      }
+    ]
   }
 }
 
@@ -84,7 +114,7 @@ resource dnsNic 'Microsoft.Network/networkInterfaces@2023-09-01' = {
           privateIPAllocationMethod: 'Static'
           privateIPAddress: dnsIps.dns
           subnet: {
-            id: onpremSubnetVm.id
+            id: '${onpremVnet.id}/subnets/snet-vm'
           }
         }
       }
@@ -103,7 +133,7 @@ resource clientNic 'Microsoft.Network/networkInterfaces@2023-09-01' = {
           privateIPAllocationMethod: 'Static'
           privateIPAddress: dnsIps.client
           subnet: {
-            id: onpremSubnetVm.id
+            id: '${onpremVnet.id}/subnets/snet-vm'
           }
         }
       }

@@ -17,6 +17,33 @@ param vmNameSuffix string
 var nsgName = '${prefix}-${vmNameSuffix}-nsg'
 var vmName = '${prefix}-${vmNameSuffix}'
 
+// NAT Gateway resources
+resource spokeNatGatewayPublicIp 'Microsoft.Network/publicIPAddresses@2023-09-01' = {
+  name: '${prefix}-${vmNameSuffix}-nat-pip'
+  location: location
+  sku: {
+    name: 'Standard'
+  }
+  properties: {
+    publicIPAllocationMethod: 'Static'
+  }
+}
+
+resource spokeNatGateway 'Microsoft.Network/natGateways@2023-09-01' = {
+  name: '${prefix}-${vmNameSuffix}-nat'
+  location: location
+  sku: {
+    name: 'Standard'
+  }
+  properties: {
+    publicIpAddresses: [
+      {
+        id: spokeNatGatewayPublicIp.id
+      }
+    ]
+  }
+}
+
 resource spokeNsg 'Microsoft.Network/networkSecurityGroups@2023-09-01' = {
   name: nsgName
   location: location
@@ -53,26 +80,27 @@ resource spokeVnet 'Microsoft.Network/virtualNetworks@2023-09-01' = {
         dnsServerIp
       ]
     }
-  }
-}
-
-resource spokeSubnetVm 'Microsoft.Network/virtualNetworks/subnets@2023-09-01' = {
-  parent: spokeVnet
-  name: 'snet-vm'
-  properties: {
-    addressPrefix: subnetVmPrefix
-    networkSecurityGroup: {
-      id: spokeNsg.id
-    }
-  }
-}
-
-resource spokeSubnetPe 'Microsoft.Network/virtualNetworks/subnets@2023-09-01' = {
-  parent: spokeVnet
-  name: 'snet-pe'
-  properties: {
-    addressPrefix: subnetPePrefix
-    privateEndpointNetworkPolicies: 'Disabled'
+    subnets: [
+      {
+        name: 'snet-vm'
+        properties: {
+          addressPrefix: subnetVmPrefix
+          networkSecurityGroup: {
+            id: spokeNsg.id
+          }
+          natGateway: {
+            id: spokeNatGateway.id
+          }
+        }
+      }
+      {
+        name: 'snet-pe'
+        properties: {
+          addressPrefix: subnetPePrefix
+          privateEndpointNetworkPolicies: 'Disabled'
+        }
+      }
+    ]
   }
 }
 
@@ -87,7 +115,7 @@ resource vmNic 'Microsoft.Network/networkInterfaces@2023-09-01' = {
           privateIPAllocationMethod: 'Static'
           privateIPAddress: vmIp
           subnet: {
-            id: spokeSubnetVm.id
+            id: '${spokeVnet.id}/subnets/snet-vm'
           }
         }
       }

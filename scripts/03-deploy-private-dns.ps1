@@ -15,20 +15,25 @@ Write-Host '=================================================='
 
 Write-Host 'Deploying Azure Private DNS zone and resolver...'
 $deployParams = @{
-    Location                = $Location
+    ResourceGroupName       = $rgHub
     TemplateFile            = $bicepFile
     TemplateParameterObject = @{
         location = $Location
         prefix   = $Prefix
-        rgNames  = @{
-            hub    = $rgHub
-            spoke1 = $rgSpoke1
-            spoke2 = $rgSpoke2
-        }
     }
 }
 
-$deployment = New-AzDeployment @deployParams
+if (-not (Get-AzResourceGroup -Name $rgHub -ErrorAction SilentlyContinue)) {
+    Write-Error "Resource group $rgHub not found. Please run 01-deploy-legacy.ps1 first."
+    exit 1
+}
+
+try {
+    $deployment = New-AzResourceGroupDeployment @deployParams -ErrorAction Stop
+} catch {
+    Write-Error "Deployment failed: $($_.Exception.Message)"
+    exit 1
+}
 
 if ($deployment.ProvisioningState -eq 'Succeeded') {
     Write-Host '✓ Phase 2 Complete: Azure Private DNS deployed'
@@ -40,7 +45,8 @@ if ($deployment.ProvisioningState -eq 'Succeeded') {
     Write-Host "  - Outbound Endpoint: $Prefix-resolver-outbound"
 }
 else {
-    Write-Error "Phase 2 deployment failed: $($deployment.ProvisioningState)"
+    Write-Error "Deployment failed with state: $($deployment.ProvisioningState)"
+    Write-Error "Check deployment errors: Get-AzResourceGroupDeploymentOperation -DeploymentName $($deployment.DeploymentName) -ResourceGroupName $rgHub"
     exit 1
 }
 

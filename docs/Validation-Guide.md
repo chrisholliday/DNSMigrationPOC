@@ -10,10 +10,6 @@ Expected behavior:
 - `azure.pvt` resolves from on‑prem and spokes.
 - `privatelink.blob.core.windows.net` is still hosted on the hub Linux DNS server.
 
-Run:
-
-- [scripts/validate.ps1](../scripts/validate.ps1) with `-Phase Legacy`
-
 ## Phase: AfterPrivateDns
 
 Expected behavior:
@@ -21,20 +17,12 @@ Expected behavior:
 - Private DNS zone exists in the hub resource group.
 - Private endpoints have registered A‑records automatically via DNS Zone Groups.
 
-Run:
-
-- [scripts/validate.ps1](../scripts/validate.ps1) with `-Phase AfterPrivateDns`
-
 ## Phase: AfterForwarders
 
 Expected behavior:
 
 - Linux DNS servers forward `privatelink.blob.core.windows.net` to the Resolver inbound endpoint.
 - On‑prem client resolves private endpoint FQDNs to private IPs.
-
-Run:
-
-- [scripts/validate.ps1](../scripts/validate.ps1) with `-Phase AfterForwarders`
 
 ## Phase: AfterSpoke1
 
@@ -46,8 +34,6 @@ Expected behavior:
 
 Run:
 
-- [scripts/validate.ps1](../scripts/validate.ps1) with `-Phase AfterSpoke1`
-
 ## Phase: AfterSpoke2
 
 Expected behavior:
@@ -55,7 +41,3 @@ Expected behavior:
 - Spoke2 is linked to Private DNS and uses Azure‑provided DNS.
 - Both spokes resolve private endpoint records from Private DNS.
 - Legacy DNS remains authoritative for `onprem.pvt` and `azure.pvt`.
-
-Run:
-
-- [scripts/validate.ps1](../scripts/validate.ps1) with `-Phase AfterSpoke2`

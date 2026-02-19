@@ -30,23 +30,3 @@ This creates:
 - Private key: `dnsmig`
 
 ## 2) Deploy the Legacy Environment
-
-Run the legacy deployment script and provide the public key path:
-
-### Deploy on Windows (PowerShell)
-
-```powershell
-./scripts/01-deploy-legacy.ps1 -SshPublicKeyPath "$HOME\.ssh\dnsmig.pub"
-```
-
-### Deploy on macOS / Linux (PowerShell)
-
-```powershell
-./scripts/01-deploy-legacy.ps1 -SshPublicKeyPath "$HOME/.ssh/dnsmig.pub"
-```
-
-## 3) Next Steps
-
-Continue with the runbook:
-
-- [docs/Migration-Runbook.md](Migration-Runbook.md)

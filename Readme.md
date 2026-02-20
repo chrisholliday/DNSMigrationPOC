@@ -80,7 +80,7 @@ Deploy Phases 1-2 and add the following:
 - Hub VNet is configured to use the onprem DNS server.
 - Azure Bastion is available for access to VMs for manual testing.
 - NAT Gateway provides internet access for OS and package updates.
-- VMs are built but not configured for any role or capability.
+- Hub VMs are built but not configured for any role or capability.
 - *Testing* at the completion of the build, a test script should verify the ability of the two VMs to:
   - Resolve common internet names.
   - Check for updates without errors.

@@ -189,11 +189,15 @@ echo "$variable"    # This WILL expand from PowerShell scope
 - `scripts/phase1-1-deploy.ps1` - Bicep validation fix, Az module imports
 - `scripts/phase1-2-deploy.ps1` - Base64+temp file config writing, absolute paths, pattern matching fixes, PowerShell escaping fixes, VM restart check logic fix
 - `scripts/phase1-2-test.ps1` - Boolean conversion fix for -match operator results
+- `bicep/phase1-3-main.bicep` - **NEW** Hub VNet infrastructure template (fixed cross-scope issue)
+- `scripts/phase1-3-deploy.ps1` - **NEW** Phase 1.3 deployment script (Bicep orchestration only)
+- `scripts/phase1-3-setup-peering.ps1` - **NEW** VNet peering setup script (separate from deployment)
+- `scripts/phase1-3-test.ps1` - **NEW** Phase 1.3 validation test script
 - `status.md` - This file
 
 ## Summary of Phase 1.2 Fixes
 
-Total issues resolved today: **6**
+Total issues resolved today: **7**
 
 1. ✓ Missing `--file` flag in bicep build command
 2. ✓ Az PowerShell module loading
@@ -201,6 +205,7 @@ Total issues resolved today: **6**
 4. ✓ PowerShell escaping in double-quoted here-strings
 5. ✓ VM restart check using proper JMESPath query
 6. ✓ Boolean conversion in test script -match operations
+7. ✓ Bicep cross-resource-group scope with modular script approach
 
 **Progress:** Phase 1.2 deployment completed successfully. Test script fixed and ready to run.
 
@@ -238,6 +243,86 @@ Total issues resolved today: **6**
 
 This is not an issue - it's the standard Ubuntu DNS architecture working as intended.
 
+## Phase 1.3 - 🚀 IN PROGRESS
+
+**Status:** Bicep cross-scope issue fixed, scripts refactored for clean separation.
+
+**Issue 7: Bicep Cross-Resource-Group Scope Error**
+
+- **Problem:** Bicep template validation failed with BCP165 error
+- **Error:** `A resource's computed scope must match that of the Bicep file for it to be deployable`
+- **Root Cause:** Attempted to create VNet peering in on-prem resource group from hub Bicep template
+  - Bicep files can only deploy resources within their target resource group scope
+  - Creating peerings in different resource groups requires either modules or separate deployment
+- **Fix Applied:** Refactored into separate scripts for cleaner separation of concerns
+  - **Bicep template:** Only creates hub-to-onprem peering (same resource group)
+  - **New script:** `phase1-3-setup-peering.ps1` creates bidirectional peering via Azure CLI
+  - **Deploy script:** Only orchestrates Bicep deployment, guides user to peering script
+- **Design Decision:** Adopted modular approach (Option A) for better maintainability
+  - Each script has single, clear responsibility
+  - Easier to debug and maintain
+  - Future orchestration script can chain them together
+- **Result:** ✓ Clean separation between infrastructure deployment and cross-RG operations
+
+**Created Files:**
+
+- ✅ `bicep/phase1-3-main.bicep` - Hub VNet infrastructure template (hub-to-onprem peering only)
+- ✅ `scripts/phase1-3-deploy.ps1` - Deployment automation (Bicep only)
+- ✅ `scripts/phase1-3-setup-peering.ps1` - **NEW** VNet peering setup (Azure CLI)
+- ✅ `scripts/phase1-3-test.ps1` - Validation test script
+
+**What Phase 1.3 Deploys:**
+
+- Hub VNet (10.1.0.0/16) with subnets:
+  - Bastion subnet: 10.1.1.0/24
+  - Workload subnet: 10.1.10.0/24
+- Azure Bastion for secure VM access
+- NAT Gateway for internet connectivity
+- 2 Linux VMs (Ubuntu 20.04):
+  - hub-vm-dns (10.1.10.4) - Future DNS server
+  - hub-vm-app (10.1.10.5) - Test/application VM
+- VNet peering (hub-to-onprem) in Bicep
+- DNS configuration: Hub VNet points to on-prem DNS (10.0.10.4)
+
+**Peering Setup (Separate Script):**
+
+- hub-to-onprem peering (if not already created by Bicep)
+- onprem-to-hub peering (cross-resource-group)
+- Verification of both peering states
+
+**Key Design Decisions:**
+
+1. **Address Space:** Non-overlapping with on-prem (10.1.x.x vs 10.0.x.x)
+2. **DNS Configuration:** VNet level DNS points to on-prem DNS server for now
+3. **VNet Peering:** Bidirectional configured via separate script for clean architecture
+4. **NSG Rules:** Allow SSH from both local and on-prem subnets, plus DNS traffic from on-prem
+5. **VM Naming:** hub-vm-app instead of hub-vm-client (will host future workloads)
+6. **Modular Scripts:** Each script has single purpose, orchestration can be added later
+
+**Validation Tests Include:**
+
+- ✓ Resource group and network resources exist
+- ✓ VNet DNS servers point to on-prem DNS (10.0.10.4)
+- ✓ VNet peering established and connected
+- ✓ VMs running and accessible
+- ✓ DNS resolution working through on-prem DNS
+- ✓ Internet connectivity via NAT Gateway
+
 ## Next Action
 
-Ready to proceed to **Phase 1.3** - Hub VNet deployment.
+**To deploy Phase 1.3:**
+
+```powershell
+# Step 1: Deploy hub infrastructure
+./scripts/phase1-3-deploy.ps1 -Force
+
+# Step 2: Set up VNet peering
+./scripts/phase1-3-setup-peering.ps1 -Force
+
+# Step 3: Validate deployment
+./scripts/phase1-3-test.ps1
+```
+
+```powershell
+./scripts/phase1-3-test.ps1
+```

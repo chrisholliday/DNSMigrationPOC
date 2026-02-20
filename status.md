@@ -2,6 +2,142 @@
 
 Date: 2026-02-20
 
+## ✅ Phase 1 - COMPLETE (Multi-Resource-Group Infrastructure)
+
+**Deployment Date:** 2026-02-20  
+**Status:** All tests passed
+
+### What Was Deployed
+
+**Architecture:** Multi-resource-group deployment using subscription-level Bicep orchestrator with modules
+
+**Resource Groups:**
+
+- **rg-onprem-dnsmig:** On-prem environment resources
+- **rg-hub-dnsmig:** Hub environment resources
+
+**Infrastructure:**
+
+- 2 VNets (10.0.0.0/16 and 10.1.0.0/16) - isolated, no peering
+- 4 VMs with Bastion access
+- Azure DNS (168.63.129.16) configured on all VMs
+- Internet connectivity via NAT Gateways
+- All VMs running and accessible
+
+**Test Results:** ✓ All 26+ tests passed
+
+- Resource groups created
+- VNets deployed with correct address spaces
+- All VMs running with correct IPs
+- Azure DNS properly configured
+- Internet connectivity verified
+- No VNet peering (as expected for Phase 1)
+- Bastions deployed and accessible
+
+### Scripts Created
+
+- `scripts/phase1-deploy.ps1` - Subscription-level deployment
+- `scripts/phase1-test.ps1` - Infrastructure validation
+- `bicep/phase1-main.bicep` - Subscription orchestrator
+- `bicep/modules/onprem-infrastructure.bicep` - On-prem module
+- `bicep/modules/hub-infrastructure.bicep` - Hub module
+
+---
+
+## ✅ Phase 2 - COMPLETE (VNet Peering)
+
+**Deployment Date:** 2026-02-20  
+**Status:** All tests passed
+
+### What Was Deployed
+
+**Goal:** Establish bidirectional VNet peering between on-prem and hub
+
+**Changes:**
+
+- Created hub-to-onprem peering (VNet access + forwarded traffic enabled)
+- Created onprem-to-hub peering (VNet access + forwarded traffic enabled)
+- Enabled cross-VNet connectivity between all VMs
+
+**Test Results:** ✓ All tests passed
+
+- Peering exists and is "Connected" in both directions
+- Cross-VNet ping tests successful (OnPrem ↔ Hub)
+- Internet connectivity still works post-peering
+
+### Scripts Used
+
+- `scripts/phase2-deploy.ps1` - VNet peering deployment
+- `scripts/phase2-test.ps1` - Peering validation
+
+---
+
+## ✅ Phase 3 - COMPLETE (On-Prem DNS Configuration)
+
+**Deployment Date:** 2026-02-20  
+**Status:** All tests passed
+
+### What Was Deployed
+
+**Goal:** Configure BIND9 DNS server on on-prem VM (without activating it)
+
+**Changes:**
+
+- Installed BIND9 on onprem-vm-dns (10.0.10.4)
+- Configured onprem.pvt authoritative zone
+- Added DNS records: dns.onprem.pvt, client.onprem.pvt, ns1.onprem.pvt
+- Configured forwarding to Azure DNS (168.63.129.16) for internet names
+- **VNet DNS settings remain unchanged** (still using Azure DNS)
+
+**Test Results:** ✓ All tests passed
+
+- BIND9 installed and running
+- Zone file validates correctly
+- DNS records resolve when queried directly
+- Forwarding to Azure DNS works for internet names
+- VNet/VMs still use Azure DNS (custom DNS not active yet)
+
+### Scripts Used
+
+- `scripts/phase3-deploy.ps1` - On-prem DNS configuration
+- `scripts/phase3-test.ps1` - DNS validation
+
+---
+
+## ✅ Phase 4 - COMPLETE (On-Prem DNS Cutover)
+
+**Deployment Date:** 2026-02-20  
+**Status:** All tests passed
+
+### What Was Deployed
+
+**Goal:** Activate custom DNS for on-prem VNet (cutover from Azure DNS)
+
+**Changes:**
+
+- Updated On-Prem VNet DNS settings to 10.0.10.4 (onprem-vm-dns)
+- Restarted VMs to acquire new DNS settings via DHCP
+- VMs now use custom DNS for all resolution
+- **Custom DNS is now active for On-Prem VNet**
+
+**Test Results:** ✓ All tests passed
+
+- VNet DNS configuration updated to 10.0.10.4
+- VMs acquired custom DNS via DHCP (verified with resolvectl status)
+- VMs resolve onprem.pvt records using custom DNS server
+- Internet names still work via forwarding to Azure DNS
+- DNS port 53 accessible from all VMs
+- VNet fully operational with custom DNS
+
+### Scripts Used
+
+- `scripts/phase4-deploy.ps1` - DNS cutover deployment
+- `scripts/phase4-test.ps1` - Cutover validation (fixed IPv6 regex)
+
+---
+
+## Previous Work Notes
+
 ## Phase 1.1 - Ready for Clean Rebuild
 
 ### Recent Script Fixes (2026-02-20)
@@ -189,15 +325,12 @@ echo "$variable"    # This WILL expand from PowerShell scope
 - `scripts/phase1-1-deploy.ps1` - Bicep validation fix, Az module imports
 - `scripts/phase1-2-deploy.ps1` - Base64+temp file config writing, absolute paths, pattern matching fixes, PowerShell escaping fixes, VM restart check logic fix
 - `scripts/phase1-2-test.ps1` - Boolean conversion fix for -match operator results
-- `bicep/phase1-3-main.bicep` - **NEW** Hub VNet infrastructure template (fixed cross-scope issue)
-- `scripts/phase1-3-deploy.ps1` - **NEW** Phase 1.3 deployment script (Bicep orchestration only)
-- `scripts/phase1-3-setup-peering.ps1` - **NEW** VNet peering setup script (separate from deployment)
-- `scripts/phase1-3-test.ps1` - **NEW** Phase 1.3 validation test script
-- `status.md` - This file
+- `archive/original-phases/` - **NEW** Archive folder with Phase 1.3 work and lessons learned
+- `status.md` - This file (refactoring documentation)
 
-## Summary of Phase 1.2 Fixes
+## Summary of Issues Resolved
 
-Total issues resolved today: **7**
+Total issues identified and resolved: **8**
 
 1. ✓ Missing `--file` flag in bicep build command
 2. ✓ Az PowerShell module loading
@@ -206,6 +339,9 @@ Total issues resolved today: **7**
 5. ✓ VM restart check using proper JMESPath query
 6. ✓ Boolean conversion in test script -match operations
 7. ✓ Bicep cross-resource-group scope with modular script approach
+8. ✓ DNS dependency deadlock - resolved via architecture refactor
+
+**Key Learning:** Proper dependency ordering (Infrastructure → Connectivity → Configuration) is critical for reliable deployment automation.
 
 **Progress:** Phase 1.2 deployment completed successfully. Test script fixed and ready to run.
 
@@ -243,86 +379,136 @@ Total issues resolved today: **7**
 
 This is not an issue - it's the standard Ubuntu DNS architecture working as intended.
 
-## Phase 1.3 - 🚀 IN PROGRESS
+## Phase 1.3 - ❌ ARCHIVED (DNS Dependency Issue)
 
-**Status:** Bicep cross-scope issue fixed, scripts refactored for clean separation.
+**Status:** Phase 1.3 development revealed fundamental architectural issue requiring full refactor.
 
-**Issue 7: Bicep Cross-Resource-Group Scope Error**
+**Issue 8: DNS Dependency Deadlock**
 
-- **Problem:** Bicep template validation failed with BCP165 error
-- **Error:** `A resource's computed scope must match that of the Bicep file for it to be deployable`
-- **Root Cause:** Attempted to create VNet peering in on-prem resource group from hub Bicep template
-  - Bicep files can only deploy resources within their target resource group scope
-  - Creating peerings in different resource groups requires either modules or separate deployment
-- **Fix Applied:** Refactored into separate scripts for cleaner separation of concerns
-  - **Bicep template:** Only creates hub-to-onprem peering (same resource group)
-  - **New script:** `phase1-3-setup-peering.ps1` creates bidirectional peering via Azure CLI
-  - **Deploy script:** Only orchestrates Bicep deployment, guides user to peering script
-- **Design Decision:** Adopted modular approach (Option A) for better maintainability
-  - Each script has single, clear responsibility
-  - Easier to debug and maintain
-  - Future orchestration script can chain them together
-- **Result:** ✓ Clean separation between infrastructure deployment and cross-RG operations
+- **Problem:** Hub deployment failed during VM provisioning
+- **Error:** DNS resolution failures during deployment, VMs couldn't reach configured DNS server
+- **Root Cause:** **Circular dependency in deployment order**
+  - Hub VNet configured to use on-prem DNS (10.0.10.4) in Bicep template
+  - VNet peering deployed in *separate script* (runs after Bicep)
+  - Hub VMs deploy before peering exists
+  - VMs can't reach on-prem DNS without peering
+  - VM extensions and configurations fail due to DNS issues
+- **Analysis:** This is an architectural problem, not a scripting bug
+  - Can't configure DNS before network connectivity established
+  - Infrastructure and configuration phases were interleaved incorrectly
+  - Phases mixed concerns: network setup + DNS config + VM deployment
+  
+**Decision: Full Architecture Refactor**
 
-**Created Files:**
+After consultation, decided to refactor entire POC to fix dependency order issues:
 
-- ✅ `bicep/phase1-3-main.bicep` - Hub VNet infrastructure template (hub-to-onprem peering only)
-- ✅ `scripts/phase1-3-deploy.ps1` - Deployment automation (Bicep only)
-- ✅ `scripts/phase1-3-setup-peering.ps1` - **NEW** VNet peering setup (Azure CLI)
-- ✅ `scripts/phase1-3-test.ps1` - Validation test script
+### Why Refactor?
 
-**What Phase 1.3 Deploys:**
+1. **Dependency Inversion:** Custom DNS configured before connectivity ready
+2. **Tight Coupling:** Infrastructure deployment coupled with DNS configuration  
+3. **Cross-VNet Dependencies:** Resources depending on unreachable services
+4. **Phase Boundaries Wrong:** Mixed infrastructure, connectivity, and configuration
 
-- Hub VNet (10.1.0.0/16) with subnets:
-  - Bastion subnet: 10.1.1.0/24
-  - Workload subnet: 10.1.10.0/24
-- Azure Bastion for secure VM access
-- NAT Gateway for internet connectivity
-- 2 Linux VMs (Ubuntu 20.04):
-  - hub-vm-dns (10.1.10.4) - Future DNS server
-  - hub-vm-app (10.1.10.5) - Test/application VM
-- VNet peering (hub-to-onprem) in Bicep
-- DNS configuration: Hub VNet points to on-prem DNS (10.0.10.4)
+### New Architecture Principle: **Infrastructure → Connectivity → Configuration**
 
-**Peering Setup (Separate Script):**
+**Phase 1: Foundation Infrastructure**
 
-- hub-to-onprem peering (if not already created by Bicep)
-- onprem-to-hub peering (cross-resource-group)
-- Verification of both peering states
+- Deploy all VNets + VMs with **Azure DNS** (default - always works)
+- No cross-VNet dependencies during deployment
+- Focus: Working infrastructure with defaults
 
-**Key Design Decisions:**
+**Phase 2: Network Connectivity**  
 
-1. **Address Space:** Non-overlapping with on-prem (10.1.x.x vs 10.0.x.x)
-2. **DNS Configuration:** VNet level DNS points to on-prem DNS server for now
-3. **VNet Peering:** Bidirectional configured via separate script for clean architecture
-4. **NSG Rules:** Allow SSH from both local and on-prem subnets, plus DNS traffic from on-prem
-5. **VM Naming:** hub-vm-app instead of hub-vm-client (will host future workloads)
-6. **Modular Scripts:** Each script has single purpose, orchestration can be added later
+- Establish all VNet peering
+- Validate cross-VNet connectivity
+- Focus: Network layer working
 
-**Validation Tests Include:**
+**Phase 3: On-Prem DNS Setup**
 
-- ✓ Resource group and network resources exist
-- ✓ VNet DNS servers point to on-prem DNS (10.0.10.4)
-- ✓ VNet peering established and connected
-- ✓ VMs running and accessible
-- ✓ DNS resolution working through on-prem DNS
-- ✓ Internet connectivity via NAT Gateway
+- Install BIND, configure zones
+- VNets still use Azure DNS (servers ready but not active)
+- Focus: DNS server configuration
+
+**Phase 4: On-Prem DNS Cutover**
+
+- Update VNet DNS settings to on-prem VM
+- Test custom DNS resolution
+- Focus: DNS transition
+
+**Phase 5: Hub DNS Setup**
+
+- Install BIND, configure zones, set up forwarding
+- Hub VNet still uses Azure DNS
+- Focus: Hub DNS server configuration
+
+**Phase 6: Hub DNS Cutover**
+
+- Update VNet DNS settings to hub VM
+- Test end-to-end resolution
+- Focus: Complete DNS architecture
+
+### Benefits of New Approach
+
+✅ **No deployment deadlocks** - infrastructure uses working defaults  
+✅ **Atomic operations** - each phase independently deployable/testable  
+✅ **Clear dependencies** - infrastructure before connectivity before config  
+✅ **Easier debugging** - network issues separate from DNS issues  
+✅ **Production pattern** - mirrors real-world deployment practices  
+✅ **Incremental rollback** - can stop/revert at any phase boundary
+
+### Archived Files
+
+Phase 1.3 work has been preserved in `archive/original-phases/` for reference:
+
+- `bicep/phase1-3-main.bicep` - Hub VNet template (with DNS dependency issue)
+- `scripts/phase1-3-deploy.ps1` - Hub deployment script
+- `scripts/phase1-3-setup-peering.ps1` - VNet peering script (reusable as-is)
+- `scripts/phase1-3-test.ps1` - Hub validation tests
+- `README.md` - Comprehensive lessons learned documentation
+
+### Reusable Components
+
+From original Phase 1-3 work, carrying forward:
+
+- ✅ Peering script pattern (idempotent, separate from deployment)
+- ✅ BIND configuration techniques (base64 + temp files)
+- ✅ Test patterns and error handling
+- ✅ Hub VNet structure (NSG rules, IP addressing, VM layout)
+- ✅ All 7 issues/fixes documented during Phase 1.2
+
+---
+
+## 🔄 REFACTOR IN PROGRESS
+
+**Current Work:** Redesigning phases with proper dependency ordering
+
+### New Phase Structure
+
+| Phase | Focus | Key Principle |
+|-------|-------|---------------|
+| Phase 1 | Infrastructure | Deploy with working defaults (Azure DNS) |
+| Phase 2 | Connectivity | Establish peering, validate network |
+| Phase 3 | On-Prem DNS Config | Configure server while VNet uses Azure DNS |
+| Phase 4 | On-Prem DNS Cutover | Switch VNet to custom DNS |
+| Phase 5 | Hub DNS Config | Configure server + forwarding |
+| Phase 6 | Hub DNS Cutover | Complete custom DNS architecture |
+
+### Status
+
+- ✅ Refactoring plan approved
+- ✅ Phase 1.3 work archived with lessons learned
+- ✅ Documentation updated
+- 🔄 Creating new Bicep templates
+- ⏳ Creating new deployment scripts
+- ⏳ Creating new test scripts
+
+---
 
 ## Next Action
 
-**To deploy Phase 1.3:**
+**Continue refactoring:**
 
-```powershell
-# Step 1: Deploy hub infrastructure
-./scripts/phase1-3-deploy.ps1 -Force
-
-# Step 2: Set up VNet peering
-./scripts/phase1-3-setup-peering.ps1 -Force
-
-# Step 3: Validate deployment
-./scripts/phase1-3-test.ps1
-```
-
-```powershell
-./scripts/phase1-3-test.ps1
-```
+1. Create consolidated infrastructure Bicep template (Phase 1)
+2. Build Phase 1 deployment script
+3. Test Phase 1 deployment
+4. Continue through remaining phases

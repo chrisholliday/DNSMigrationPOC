@@ -47,88 +47,102 @@ Peering is configured between On-Prem <-> Hub, and Hub <-> each Spoke.
 
 ## Deployment Phases
 
-### Phase 1.1 - On-Prem initial build (onprem)
+**Architecture Principle:** Infrastructure → Connectivity → Configuration
 
-Deploy only the on-prem resource group.
+All VNets are deployed with Azure DNS initially to avoid cross-VNet dependencies. Custom DNS is configured and activated after network connectivity is established.
 
-- VNet is configured to use Azure DNS.
-- Azure Bastion is available for access to VMs for manual testing.
-- NAT Gateway provides internet access for OS and package updates.
-- VMs are built but not configured for any role or capability.
-- *Testing* at the completion of the build, a test script should verify the ability of the two VMs to:
-  - Resolve common internet names.
-  - Check for updates without errors.
-- Manual testing with Azure Bastion will confirm the test script.
+### Phase 1: Foundation Infrastructure
 
-### Phase 1.2 - Deploy DNS services (onprem)
+**Goal:** Deploy all base networking with working defaults (Azure DNS)
 
-- Deploy Phase 1 and add the following:
-  - DNS VM is configured to host the onprem DNS zone.
-  - DNS VM is configured to forward all other requests to Azure DNS.
-  - DNS VM and client VM have records in the onprem DNS zone.
-  - VNet is configured to point DNS services to the DNS VM.
-- *Testing* at the completion of the build, a test script should verify the ability of the two VMs to:
-  - Resolve common internet names.
-  - Verify that resolution is provided by the DNS VM.
-  - Check for updates without errors.
-- Manual testing with Azure Bastion will confirm the test script.
+- Deploy On-Prem VNet (10.0.0.0/16)
+  - 2 VMs: onprem-vm-dns, onprem-vm-client
+  - Azure Bastion, NAT Gateway
+- Deploy Hub VNet (10.1.0.0/16)
+  - 2 VMs: hub-vm-dns, hub-vm-app
+  - Azure Bastion, NAT Gateway
+- **DNS:** All VNets use Azure DNS (168.63.129.16)
+- **Testing:** VM provisioning, internet connectivity, package updates
 
-### Phase 1.3 - Hub configuration build (hub)
+### Phase 2: Network Connectivity
 
-Deploy Phases 1-2 and add the following:
+**Goal:** Establish VNet peering and validate cross-VNet communication
 
-- Hub VNet is configured to use the onprem DNS server.
-- Azure Bastion is available for access to VMs for manual testing.
-- NAT Gateway provides internet access for OS and package updates.
-- Hub VMs are built but not configured for any role or capability.
-- *Testing* at the completion of the build, a test script should verify the ability of the two VMs to:
-  - Resolve common internet names.
-  - Check for updates without errors.
-- Manual testing with Azure Bastion will confirm the test script.
+- Create bidirectional peering: On-Prem ↔ Hub
+- Validate network connectivity between VNets
+- **Testing:** Cross-VNet ping, routing validation
 
-### Phase 1.4 - Hub deploy DNS services
+### Phase 3: On-Prem DNS Configuration
 
-Deploy Phases 1-3 and add the following:
+**Goal:** Configure DNS server while VNet still uses Azure DNS
 
-- Hub DNS VM is configured to host the azure.pvt DNS zone.
-- Hub DNS VM is configured to host the privatelink.blob.core.windows.net zone.
-- Hub DNS VM is configured to forward all other requests to onprem DNS.
-- Onprem DNS VM is configured to forward azure.pvt requests to the hub DNS VM.
-- VNet is configured to point DNS services to the hub DNS VM.
-- *Testing* at the completion of the build, a test script should verify the ability of all VMs to:
-  - Resolve common internet names.
-  - Verify that resolution is provided by the correct DNS VM.
-  - Check for updates without errors.
-- Manual testing with Azure Bastion will confirm the test script.
+- Install BIND9 on onprem-vm-dns
+- Configure onprem.pvt DNS zone
+- Add host records (DNS VM, client VM)
+- Configure forwarding to Azure DNS for internet names
+- **VNet DNS:** Still uses Azure DNS (servers ready but not active)
+- **Testing:** Query DNS server directly, but VNet still uses Azure DNS
 
-### Phase 1.5 - Add other networks
+### Phase 4: On-Prem DNS Cutover
 
-- Deploy all remaining virtual networks.
-- All VNets use the **hub DNS VM** as their DNS server (except on-prem, which uses its own DNS VM).
+**Goal:** Switch On-Prem VNet to use custom DNS
 
-### Phase 1.6 - Add Storage Accounts
+- Update On-Prem VNet DNS setting to point to onprem-vm-dns (10.0.10.4)
+- Validate DHCP renewal propagates to VMs
+- **Testing:** VMs resolve via custom DNS, onprem.pvt zone working
 
-- Deploy a storage account in each spoke network.
+### Phase 5: Hub DNS Configuration
 
-- Register the private endpoint in the hub DNS VM.
-- Validate name resolution from hub and onprem client VMs.
+**Goal:** Configure hub DNS server and establish DNS forwarding
 
-### Phase 2.1 - Azure Private DNS + Resolver
+- Install BIND9 on hub-vm-dns
+- Configure azure.pvt DNS zone
+- Configure privatelink.blob.core.windows.net zone (legacy)
+- Configure forwarding to onprem-vm-dns for onprem.pvt
+- Update onprem-vm-dns to forward azure.pvt to hub-vm-dns
+- **VNet DNS:** Hub still uses Azure DNS (server ready but not active)
+- **Testing:** Query hub DNS server directly, bidirectional forwarding works
 
-- Create the Azure Private DNS zone for `privatelink.blob.core.windows.net` in the hub resource group.
-- Create DNS Resolver inbound/outbound endpoints and a forwarding ruleset.
+### Phase 6: Hub DNS Cutover
 
-### Phase 2.2 - Update Legacy Forwarders
+**Goal:** Switch Hub VNet to use custom DNS, complete DNS architecture
 
-Switch legacy DNS servers to forward `privatelink.blob.core.windows.net` to the Private Resolver inbound endpoint.
+- Update Hub VNet DNS setting to point to hub-vm-dns (10.1.10.4)
+- Validate DHCP renewal propagates to VMs
+- **Testing:** Full DNS resolution chain working (onprem.pvt, azure.pvt, internet)
 
-### Phase 2.3 - Migrate Spoke1
+---
 
-Switch Spoke1 VNet to Azure-provided DNS (keeps Spoke2 on the hub DNS VM).
+### Future Phases (Storage, Private DNS, Spoke Migration)
 
-### Phase 2.4 - Migrate Spoke2
+### Phase 7: Spoke Networks & Storage
 
-Link Spoke2 to the private DNS zone (if not already) and switch it to Azure-provided DNS.
+- Deploy Spoke VNets with storage accounts
+- Configure private endpoints
+- Register in hub DNS server
+
+### Phase 8: Azure Private DNS Infrastructure
+
+- Create Azure Private DNS zone for privatelink.blob.core.windows.net
+- Deploy Private DNS Resolver (inbound + outbound endpoints)
+- Configure forwarding rules
+
+### Phase 9: Hub DNS Migration to Private Resolver
+
+- Update hub-vm-dns to forward privatelink queries to resolver
+- Update onprem-vm-dns to forward privatelink queries to resolver
+
+### Phase 10: Spoke1 Migration
+
+- Switch Spoke1 VNet to Azure-provided DNS
+- Link Spoke1 to Private DNS zone
+- Validate resolution via Azure Private DNS
+
+### Phase 11: Spoke2 Migration
+
+- Switch Spoke2 VNet to Azure-provided DNS
+- Link Spoke2 to Private DNS zone
+- Complete migration to Azure Private DNS
 
 ## Validation
 

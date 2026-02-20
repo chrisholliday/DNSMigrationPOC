@@ -52,8 +52,15 @@ Write-Host ''
 Write-Host '[1/5] Validating prerequisites...' -ForegroundColor Yellow
 
 # Check Azure CLI/PowerShell modules
-if (-not (Get-Command az -ErrorAction SilentlyContinue) -and -not (Get-Module -Name Az.Accounts -ErrorAction SilentlyContinue)) {
+if (-not (Get-Command az -ErrorAction SilentlyContinue) -and -not (Get-Module -ListAvailable -Name Az.Accounts)) {
     Write-Error 'Azure CLI or Az PowerShell module not found. Please install: https://aka.ms/azure-cli or Install-Module -Name Az -Force'
+}
+
+# Import Az modules if available (for New-AzResourceGroupDeployment)
+if (Get-Module -ListAvailable -Name Az.Accounts) {
+    Import-Module Az.Accounts -ErrorAction SilentlyContinue | Out-Null
+    Import-Module Az.Resources -ErrorAction SilentlyContinue | Out-Null
+    Write-Host '✓ Az PowerShell modules loaded' -ForegroundColor Green
 }
 
 # Validate Bicep template exists
@@ -122,10 +129,13 @@ Write-Host '✓ Resource group created/updated' -ForegroundColor Green
 Write-Host ''
 Write-Host '[4/5] Validating Bicep template...' -ForegroundColor Yellow
 
-az bicep build-params `
-    --file (Join-Path (Split-Path $BicepTemplatePath -Parent) 'phase1-1-params.bicepparam') `
-    --outfile (Join-Path $PSScriptRoot '../bicep/.phase1-1.json') `
+az bicep build --file $BicepTemplatePath --outfile (Join-Path $PSScriptRoot '../bicep/.phase1-1.json') `
     2>&1 | Where-Object { $_ -match 'error|warning' } | ForEach-Object { Write-Host "  ⚠ $_" }
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Error 'Bicep template validation failed'
+}
+Write-Host '✓ Bicep template validated' -ForegroundColor Green
 
 # Deploy Bicep template
 Write-Host ''

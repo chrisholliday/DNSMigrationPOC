@@ -91,7 +91,8 @@ Write-Host '[2/4] Configuring BIND on DNS VM...' -ForegroundColor Yellow
 
 $serial = Get-Date -Format 'yyyyMMdd01'
 
-$zoneFile = @"
+# Prepare config content in PowerShell (clean, readable)
+$zoneFileContent = @"
 `$TTL 3600
 @   IN SOA ns1.$ZoneName. admin.$ZoneName. (
                 $serial ; serial
@@ -103,15 +104,10 @@ $zoneFile = @"
 ns1 IN A $dnsVmIp
 dns IN A $dnsVmIp
 client IN A $clientVmIp
+
 "@
 
-# Explicitly ensure the file ends with a newline
-$zoneFile += "`n"
-
-$zoneFileB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($zoneFile))
-
-# Generate BIND config files with variables expanded in PowerShell
-$bindOptionsConfig = @"
+$bindOptionsContent = @"
 options {
     directory "/var/cache/bind";
     recursion yes;
@@ -121,67 +117,129 @@ options {
     forwarders { $ForwarderIp; };
     dnssec-validation no;
 };
+
 "@
 
-$bindOptionsConfig += "`n"
-
-$bindLocalConfig = @"
+$bindLocalContent = @"
 zone "$ZoneName" {
   type master;
   file "/etc/bind/db.$ZoneName";
 };
+
 "@
 
-$bindLocalConfig += "`n"
-
-$bindOptionsB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($bindOptionsConfig))
-$bindLocalB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($bindLocalConfig))
+# Convert to base64 once in PowerShell
+$zoneFileB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($zoneFileContent))
+$bindOptionsB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($bindOptionsContent))
+$bindLocalB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($bindLocalContent))
 
 # Install BIND
 $installScript = @'
 #!/bin/bash
 set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+export PATH=/usr/bin:/usr/sbin:/bin:/sbin:$PATH
 sudo apt-get update
 sudo apt-get install -y bind9 bind9utils dnsutils
+# Verify installation with absolute paths
+test -x /usr/sbin/named-checkconf || test -x /usr/bin/named-checkconf || exit 1
+test -x /usr/sbin/named-checkzone || test -x /usr/bin/named-checkzone || exit 1
+test -x /usr/bin/dig || exit 1
+echo "BIND installation complete"
 '@
 
-az vm run-command invoke `
+Write-Host '  Installing BIND9...' -ForegroundColor Cyan
+$installOutput = az vm run-command invoke `
     --resource-group $ResourceGroupName `
     --name $DnsVmName `
     --command-id RunShellScript `
-    --scripts $installScript | Out-Null
+    --scripts $installScript `
+    --query 'value[0].message' -o tsv
 
-# Write BIND config files from base64
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  Installation output: $installOutput" -ForegroundColor Red
+    Write-Error "BIND installation failed on $DnsVmName"
+}
+
+# Check for success marker - use simpler contains check
+if (-not ($installOutput -like '*BIND installation complete*')) {
+    Write-Host "  Installation output: $installOutput" -ForegroundColor Red
+    Write-Error 'BIND installation did not complete successfully'
+}
+
+Write-Host '  ✓ BIND9 installed' -ForegroundColor Green
+
+# Write BIND config files using base64 via temp files (most reliable approach)
+# This avoids: 1) escaping issues with heredocs, 2) long command-line arguments
+Write-Host '  Writing BIND configuration files...' -ForegroundColor Cyan
+
+# Single script that writes all three config files from base64
 $configScript = @"
 #!/bin/bash
 set -euo pipefail
-echo '$bindOptionsB64' | base64 -d | sudo tee /etc/bind/named.conf.options > /dev/null
-echo '$bindLocalB64' | base64 -d | sudo tee /etc/bind/named.conf.local > /dev/null
-echo '$zoneFileB64' | base64 -d | sudo tee /etc/bind/db.$ZoneName > /dev/null
+export PATH=/usr/bin:/usr/sbin:/bin:/sbin:`$PATH
+
+# Write named.conf.options
+echo '$bindOptionsB64' > /tmp/options.b64
+base64 -d /tmp/options.b64 | sudo tee /etc/bind/named.conf.options > /dev/null
+rm /tmp/options.b64
+
+# Write named.conf.local  
+echo '$bindLocalB64' > /tmp/local.b64
+base64 -d /tmp/local.b64 | sudo tee /etc/bind/named.conf.local > /dev/null
+rm /tmp/local.b64
+
+# Write zone file
+echo '$zoneFileB64' > /tmp/zone.b64
+base64 -d /tmp/zone.b64 | sudo tee /etc/bind/db.$ZoneName > /dev/null
+rm /tmp/zone.b64
+
+# Verify all files exist
+test -f /etc/bind/named.conf.options || exit 1
+test -f /etc/bind/named.conf.local || exit 1
+test -f /etc/bind/db.$ZoneName || exit 1
+
+echo 'All configuration files written successfully'
 "@
 
-az vm run-command invoke `
+$configOutput = az vm run-command invoke `
     --resource-group $ResourceGroupName `
     --name $DnsVmName `
     --command-id RunShellScript `
-    --scripts $configScript | Out-Null
+    --scripts $configScript `
+    --query 'value[0].message' -o tsv
+
+if ($LASTEXITCODE -ne 0 -or -not ($configOutput -like '*successfully*')) {
+    Write-Host "  Config output: $configOutput" -ForegroundColor Red
+    Write-Error 'Failed to write BIND configuration files'
+}
+
+Write-Host '  ✓ Configuration files written' -ForegroundColor Green
 
 # Validate, restart, and test DNS resolution
+Write-Host '  Validating BIND configuration and starting service...' -ForegroundColor Cyan
 $validateScript = @"
 #!/bin/bash
 set -euo pipefail
-sudo named-checkconf
-sudo named-checkzone $ZoneName /etc/bind/db.$ZoneName
+export PATH=/usr/bin:/usr/sbin:/bin:/sbin:`$PATH
+echo "Running named-checkconf..."
+sudo /usr/sbin/named-checkconf || sudo /usr/bin/named-checkconf
+echo "Running named-checkzone..."
+sudo /usr/sbin/named-checkzone $ZoneName /etc/bind/db.$ZoneName || sudo /usr/bin/named-checkzone $ZoneName /etc/bind/db.$ZoneName
+echo "Enabling named service..."
 # Enable named (redirect stderr as it's just informational)
 sudo systemctl enable named 2>/dev/null || true
+echo "Restarting named service..."
 sudo systemctl restart named
 # Wait for BIND to fully start and load zones
 sleep 3
 # Reload zones to ensure they're active
-sudo rndc reload
+echo "Reloading zones..."
+sudo /usr/sbin/rndc reload || sudo /usr/bin/rndc reload
 sleep 2
 # Test DNS resolution - this is our success criteria
-dig @127.0.0.1 +short dns.$ZoneName
+echo "Testing DNS resolution..."
+/usr/bin/dig @127.0.0.1 +short dns.$ZoneName
 "@
 
 $validateOutput = az vm run-command invoke `
@@ -192,7 +250,10 @@ $validateOutput = az vm run-command invoke `
     --query 'value[0].message' -o tsv
 
 if ($LASTEXITCODE -ne 0) {
-    Write-Error "BIND configuration failed on $DnsVmName. Output: $validateOutput"
+    Write-Host '  ✗ Validation failed' -ForegroundColor Red
+    Write-Host '  Full output:' -ForegroundColor Yellow
+    Write-Host $validateOutput
+    Write-Error "BIND configuration failed on $DnsVmName"
 }
 
 # Check if DNS resolution worked by looking for an IP address in the output
@@ -233,9 +294,9 @@ while ($attempt -lt $maxAttempts) {
     $vmState = az vm get-instance-view `
         --resource-group $ResourceGroupName `
         --name $DnsVmName `
-        --query "{powerState:instanceView.statuses[?starts_with(code, 'powerState')].code, provisioningState:provisioningState}" -o json | ConvertFrom-Json
+        --query "instanceView.statuses[?starts_with(code, 'PowerState/')].code | [0]" -o tsv
     
-    if ($vmState.powerState -like '*running*') {
+    if ($vmState -eq 'PowerState/running') {
         Write-Host "  ✓ $DnsVmName is running" -ForegroundColor Green
         $dnsVmReady = $true
         break
@@ -268,9 +329,9 @@ while ($attempt -lt $maxAttempts) {
     $vmState = az vm get-instance-view `
         --resource-group $ResourceGroupName `
         --name $ClientVmName `
-        --query "{powerState:instanceView.statuses[?starts_with(code, 'powerState')].code, provisioningState:provisioningState}" -o json | ConvertFrom-Json
+        --query "instanceView.statuses[?starts_with(code, 'PowerState/')].code | [0]" -o tsv
     
-    if ($vmState.powerState -like '*running*') {
+    if ($vmState -eq 'PowerState/running') {
         Write-Host "  ✓ $ClientVmName is running" -ForegroundColor Green
         $clientVmReady = $true
         break

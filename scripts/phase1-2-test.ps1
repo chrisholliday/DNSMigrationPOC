@@ -92,7 +92,7 @@ $bindStatus = az vm run-command invoke `
     --scripts 'systemctl is-active bind9' `
     --query 'value[0].message' -o tsv
 
-$bindActive = $bindStatus -match 'active'
+$bindActive = [bool]($bindStatus -match 'active')
 Test-Result -Name 'bind9 service running' -Success $bindActive -Message "bind9 status: $bindStatus"
 
 Write-Host ''
@@ -107,7 +107,7 @@ $resolveOutput = az vm run-command invoke `
     --scripts "dig +short dns.$ZoneName" `
     --query 'value[0].message' -o tsv
 
-$resolved = $resolveOutput -match '\b\d{1,3}(\.\d{1,3}){3}\b'
+$resolved = [bool]($resolveOutput -match '\b\d{1,3}(\.\d{1,3}){3}\b')
 Test-Result -Name "Resolve dns.$ZoneName" -Success $resolved -Message "No IP returned. Output: $resolveOutput"
 
 Write-Host ''

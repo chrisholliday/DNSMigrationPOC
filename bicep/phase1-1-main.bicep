@@ -193,7 +193,8 @@ resource dnsNic 'Microsoft.Network/networkInterfaces@2021-08-01' = {
           subnet: {
             id: workloadSubnetRef.id
           }
-          privateIPAllocationMethod: 'Dynamic'
+          privateIPAllocationMethod: 'Static'
+          privateIPAddress: '10.0.10.4'
         }
       }
     ]
@@ -215,7 +216,8 @@ resource clientNic 'Microsoft.Network/networkInterfaces@2021-08-01' = {
           subnet: {
             id: workloadSubnetRef.id
           }
-          privateIPAllocationMethod: 'Dynamic'
+          privateIPAllocationMethod: 'Static'
+          privateIPAddress: '10.0.10.5'
         }
       }
     ]

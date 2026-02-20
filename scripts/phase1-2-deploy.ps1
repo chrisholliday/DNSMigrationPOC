@@ -87,7 +87,7 @@ Write-Host "✓ $ClientVmName IP: $clientVmIp" -ForegroundColor Green
 
 Write-Host ''
 Write-Host ''
-Write-Host '[2/5] Configuring BIND on DNS VM...' -ForegroundColor Yellow
+Write-Host '[2/4] Configuring BIND on DNS VM...' -ForegroundColor Yellow
 
 $serial = Get-Date -Format 'yyyyMMdd01'
 
@@ -103,18 +103,15 @@ $zoneFile = @"
 ns1 IN A $dnsVmIp
 dns IN A $dnsVmIp
 client IN A $clientVmIp
- 
 "@
+
+# Explicitly ensure the file ends with a newline
+$zoneFile += "`n"
 
 $zoneFileB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($zoneFile))
 
-$bindScript = @"
-#!/bin/bash
-set -euo pipefail
-sudo apt-get update
-sudo apt-get install -y bind9 bind9utils dnsutils
-
-sudo tee /etc/bind/named.conf.options > /dev/null <<EOF
+# Generate BIND config files with variables expanded in PowerShell
+$bindOptionsConfig = @"
 options {
     directory "/var/cache/bind";
     recursion yes;
@@ -124,54 +121,91 @@ options {
     forwarders { $ForwarderIp; };
     dnssec-validation no;
 };
-EOF
+"@
 
-sudo tee /etc/bind/named.conf.local > /dev/null <<EOF
+$bindOptionsConfig += "`n"
+
+$bindLocalConfig = @"
 zone "$ZoneName" {
   type master;
   file "/etc/bind/db.$ZoneName";
 };
-EOF
-
-echo '$zoneFileB64' | base64 -d | sudo tee /etc/bind/db.$ZoneName > /dev/null
-
-sudo named-checkconf
-sudo named-checkzone $ZoneName /etc/bind/db.$ZoneName
-sudo systemctl enable bind9
-sudo systemctl restart bind9
 "@
 
-$bindOutput = az vm run-command invoke `
+$bindLocalConfig += "`n"
+
+$bindOptionsB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($bindOptionsConfig))
+$bindLocalB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($bindLocalConfig))
+
+# Install BIND
+$installScript = @'
+#!/bin/bash
+set -euo pipefail
+sudo apt-get update
+sudo apt-get install -y bind9 bind9utils dnsutils
+'@
+
+az vm run-command invoke `
     --resource-group $ResourceGroupName `
     --name $DnsVmName `
     --command-id RunShellScript `
-    --scripts $bindScript `
+    --scripts $installScript | Out-Null
+
+# Write BIND config files from base64
+$configScript = @"
+#!/bin/bash
+set -euo pipefail
+echo '$bindOptionsB64' | base64 -d | sudo tee /etc/bind/named.conf.options > /dev/null
+echo '$bindLocalB64' | base64 -d | sudo tee /etc/bind/named.conf.local > /dev/null
+echo '$zoneFileB64' | base64 -d | sudo tee /etc/bind/db.$ZoneName > /dev/null
+"@
+
+az vm run-command invoke `
+    --resource-group $ResourceGroupName `
+    --name $DnsVmName `
+    --command-id RunShellScript `
+    --scripts $configScript | Out-Null
+
+# Validate, restart, and test DNS resolution
+$validateScript = @"
+#!/bin/bash
+set -euo pipefail
+sudo named-checkconf
+sudo named-checkzone $ZoneName /etc/bind/db.$ZoneName
+# Enable named (redirect stderr as it's just informational)
+sudo systemctl enable named 2>/dev/null || true
+sudo systemctl restart named
+# Wait for BIND to fully start and load zones
+sleep 3
+# Reload zones to ensure they're active
+sudo rndc reload
+sleep 2
+# Test DNS resolution - this is our success criteria
+dig @127.0.0.1 +short dns.$ZoneName
+"@
+
+$validateOutput = az vm run-command invoke `
+    --resource-group $ResourceGroupName `
+    --name $DnsVmName `
+    --command-id RunShellScript `
+    --scripts $validateScript `
     --query 'value[0].message' -o tsv
 
 if ($LASTEXITCODE -ne 0) {
-    Write-Error "BIND configuration failed on $DnsVmName. Output: $bindOutput"
+    Write-Error "BIND configuration failed on $DnsVmName. Output: $validateOutput"
 }
 
-Write-Host '✓ DNS VM configured with BIND and zone file' -ForegroundColor Green
-
-Write-Host ''
-Write-Host '[3/5] Validating DNS VM local resolution...' -ForegroundColor Yellow
-
-$validationOutput = az vm run-command invoke `
-    --resource-group $ResourceGroupName `
-    --name $DnsVmName `
-    --command-id RunShellScript `
-    --scripts "dig @127.0.0.1 +short dns.$ZoneName" `
-    --query 'value[0].message' -o tsv
-
-if ($validationOutput -notmatch '\b\d{1,3}(\.\d{1,3}){3}\b') {
-    Write-Error "DNS validation failed on $DnsVmName. Output: $validationOutput"
+# Check if DNS resolution worked by looking for an IP address in the output
+if ($validateOutput -match '10\.0\.10\.4') {
+    Write-Host '✓ DNS VM configured with BIND and zone file' -ForegroundColor Green
+    Write-Host '✓ DNS VM responds for local zone queries' -ForegroundColor Green
+}
+else {
+    Write-Error "DNS validation failed - expected 10.0.10.4 in output. Got: $validateOutput"
 }
 
-Write-Host '✓ DNS VM responds for local zone queries' -ForegroundColor Green
-
 Write-Host ''
-Write-Host '[4/5] Updating VNet DNS servers...' -ForegroundColor Yellow
+Write-Host '[3/4] Updating VNet DNS servers...' -ForegroundColor Yellow
 
 az network vnet update `
     --resource-group $ResourceGroupName `
@@ -181,17 +215,77 @@ az network vnet update `
 Write-Host "✓ VNet DNS set to $dnsVmIp" -ForegroundColor Green
 
 Write-Host ''
-Write-Host '[5/5] Rebooting VMs to apply DNS settings...' -ForegroundColor Yellow
+Write-Host '[4/4] Rebooting VMs to apply DNS settings...' -ForegroundColor Yellow
 
+# Restart DNS VM FIRST and wait for it to be fully online
+Write-Host "  Restarting $DnsVmName..." -ForegroundColor Cyan
 az vm restart `
     --resource-group $ResourceGroupName `
     --name $DnsVmName | Out-Null
 
+# Wait for DNS VM to be fully running (provisioning state healthy)
+Write-Host "  Waiting for $DnsVmName to fully recover..." -ForegroundColor Cyan
+$maxAttempts = 60
+$attempt = 0
+$dnsVmReady = $false
+
+while ($attempt -lt $maxAttempts) {
+    $vmState = az vm get-instance-view `
+        --resource-group $ResourceGroupName `
+        --name $DnsVmName `
+        --query "{powerState:instanceView.statuses[?starts_with(code, 'powerState')].code, provisioningState:provisioningState}" -o json | ConvertFrom-Json
+    
+    if ($vmState.powerState -like '*running*') {
+        Write-Host "  ✓ $DnsVmName is running" -ForegroundColor Green
+        $dnsVmReady = $true
+        break
+    }
+    
+    $attempt++
+    Start-Sleep -Seconds 2
+    Write-Host "  ⏳ Still waiting... ($attempt / $maxAttempts)" -ForegroundColor DarkGray
+}
+
+if (-not $dnsVmReady) {
+    Write-Error "$DnsVmName failed to restart within timeout period"
+}
+
+# Wait additional time to ensure network is fully operational on DNS VM
+Start-Sleep -Seconds 5
+
+# Now restart the client VM (which will have a healthy DNS server available)
+Write-Host "  Restarting $ClientVmName..." -ForegroundColor Cyan
 az vm restart `
     --resource-group $ResourceGroupName `
     --name $ClientVmName | Out-Null
 
-Write-Host '✓ VMs restarted' -ForegroundColor Green
+# Wait for client VM to be fully running
+Write-Host "  Waiting for $ClientVmName to fully recover..." -ForegroundColor Cyan
+$attempt = 0
+$clientVmReady = $false
+
+while ($attempt -lt $maxAttempts) {
+    $vmState = az vm get-instance-view `
+        --resource-group $ResourceGroupName `
+        --name $ClientVmName `
+        --query "{powerState:instanceView.statuses[?starts_with(code, 'powerState')].code, provisioningState:provisioningState}" -o json | ConvertFrom-Json
+    
+    if ($vmState.powerState -like '*running*') {
+        Write-Host "  ✓ $ClientVmName is running" -ForegroundColor Green
+        $clientVmReady = $true
+        break
+    }
+    
+    $attempt++
+    Start-Sleep -Seconds 2
+    Write-Host "  ⏳ Still waiting... ($attempt / $maxAttempts)" -ForegroundColor DarkGray
+}
+
+if (-not $clientVmReady) {
+    Write-Error "$ClientVmName failed to restart within timeout period"
+}
+
+Write-Host '✓ Both VMs have rebooted and are online' -ForegroundColor Green
 
 $elapsedTime = (Get-Date) - $script:deploymentStartTime
 Write-Host ''

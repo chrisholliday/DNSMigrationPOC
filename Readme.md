@@ -111,38 +111,46 @@ All VNets are deployed with Azure DNS initially to avoid cross-VNet dependencies
 - Validate DHCP renewal propagates to VMs
 - **Testing:** Full DNS resolution chain working (onprem.pvt, azure.pvt, internet)
 
----
-
-### Future Phases (Storage, Private DNS, Spoke Migration)
-
 ### Phase 7: Spoke Networks & Storage
 
-- Deploy Spoke VNets with storage accounts
-- Configure private endpoints
-- Register in hub DNS server
+**Goal:** Deploy spoke networks with storage accounts and configure legacy DNS
 
-### Phase 8: Azure Private DNS Infrastructure
+- Deploy Spoke1 and Spoke2 VNets (10.2.0.0/16, 10.3.0.0/16)
+- Configure VNet peering: Hub ↔ Spoke1, Hub ↔ Spoke2
+- Point spoke VNets to hub DNS server (10.1.10.4)
+- Deploy storage accounts with private endpoints on each spoke
+- **Auto-generate** privatelink.blob.core.windows.net DNS records from private endpoint IPs
+- Update hub-vm-dns BIND9 configuration with privatelink zone
+- **Testing:** All environments resolve storage account names via hub DNS server
 
-- Create Azure Private DNS zone for privatelink.blob.core.windows.net
+### Phase 8: Azure Private DNS + Resolver + Forwarding
+
+**Goal:** Deploy Azure Private DNS infrastructure and configure DNS forwarding
+
+- Create Azure Private DNS zone (privatelink.blob.core.windows.net)
 - Deploy Private DNS Resolver (inbound + outbound endpoints)
-- Configure forwarding rules
+- Link private endpoints to DNS zone (auto-registration enabled)
+- Configure hub-vm-dns to forward privatelink queries → resolver inbound endpoint
+- Configure onprem-vm-dns to forward privatelink queries → resolver inbound endpoint
+- **Testing:** Resolution works via both paths (BIND9 legacy + Azure Private DNS)
 
-### Phase 9: Hub DNS Migration to Private Resolver
+### Phase 9: Spoke1 Migration
 
-- Update hub-vm-dns to forward privatelink queries to resolver
-- Update onprem-vm-dns to forward privatelink queries to resolver
+**Goal:** Migrate Spoke1 to Azure Private DNS
 
-### Phase 10: Spoke1 Migration
+- Switch Spoke1 VNet DNS to Azure-provided DNS (168.63.129.16)
+- Link Spoke1 VNet to Private DNS zone
+- Remove Spoke1 storage records from hub-vm-dns BIND9 (legacy cleanup)
+- **Testing:** Spoke1 resolves via Azure Private DNS, Spoke2 still via BIND9
 
-- Switch Spoke1 VNet to Azure-provided DNS
-- Link Spoke1 to Private DNS zone
-- Validate resolution via Azure Private DNS
+### Phase 10: Spoke2 Migration
 
-### Phase 11: Spoke2 Migration
+**Goal:** Complete migration by moving Spoke2 to Azure Private DNS
 
-- Switch Spoke2 VNet to Azure-provided DNS
-- Link Spoke2 to Private DNS zone
-- Complete migration to Azure Private DNS
+- Switch Spoke2 VNet DNS to Azure-provided DNS (168.63.129.16)
+- Link Spoke2 VNet to Private DNS zone
+- Remove privatelink zone from hub-vm-dns BIND9 (legacy cleanup complete)
+- **Testing:** Both spokes resolve via Azure Private DNS, migration complete
 
 ## Validation
 

@@ -1,19 +1,135 @@
-# Phase 1.1 Deployment Scripts
+# DNS Migration POC - Deployment Scripts
 
-This directory contains the focused, minimal automation for deploying Phase 1.1 of the DNS Migration POC.
+This directory contains automation for deploying the DNS Migration POC in phases.
 
-## Overview
+## Quick Start (Recommended for POC Setup)
 
-**Phase 1.1 Goal**: Deploy on-prem VNet infrastructure with basic networking, VMs, Bastion, and NAT Gateway.
+### **🚀 Consolidated Scripts** — Fast Path to Complete Environment
 
-- No DNS configuration yet (that's Phase 1.2)
-- Two Ubuntu VMs with SSH access
-- Azure Bastion for secure VM access
-- NAT Gateway for internet access (OS updates, package installation)
+For rapid POC deployment, use the consolidated scripts that deploy Phases 1-6 in one go:
 
-## Scripts
+```powershell
+# Deploy complete DNS migration environment (Phases 1-6)
+./phase1-6-deploy.ps1 -Force
 
-### 1. **phase1-1-deploy.ps1** — Deploy Phase 1.1
+# Validate deployment
+./phase6-test.ps1
+
+# Clean up everything
+./phase1-6-teardown.ps1 -Force
+```
+
+**What Gets Deployed:**
+
+- ✅ Phase 1: On-prem + Hub infrastructure (VNets, VMs, Bastion, NAT Gateway)
+- ✅ Phase 2: VNet peering (On-prem ↔ Hub)
+- ✅ Phase 3: On-prem DNS server (BIND9, onprem.pvt zone)
+- ✅ Phase 4: On-prem DNS cutover (VNet → 10.0.10.4)
+- ✅ Phase 5: Hub DNS server (BIND9, azure.pvt zone, bidirectional forwarding)
+- ✅ Phase 6: Hub DNS cutover (VNet → 10.1.10.4)
+
+**Estimated Time:** 25-35 minutes
+
+**When to Use Consolidated Scripts:**
+
+- ✅ Initial POC setup
+- ✅ Rebuilding after teardown
+- ✅ Demonstrating end-to-end migration
+- ✅ Quick validation of changes
+
+**When to Use Individual Phase Scripts:**
+
+- 🔍 Learning the migration pattern step-by-step
+- 🐛 Debugging specific phase failures
+- 📊 Validating checkpoint states
+- 🎓 Educational demonstrations
+
+---
+
+## Individual Phase Scripts
+
+For granular control and learning, each phase has separate deploy/test scripts:
+
+| Phase | Deploy Script | Test Script | Description |
+|-------|---------------|-------------|-------------|
+| **1** | `phase1-deploy.ps1` | `phase1-test.ps1` | Infrastructure (On-prem + Hub) |
+| **2** | `phase2-deploy.ps1` | `phase2-test.ps1` | VNet Peering |
+| **3** | `phase3-deploy.ps1` | `phase3-test.ps1` | On-prem DNS Configuration |
+| **4** | `phase4-deploy.ps1` | `phase4-test.ps1` | On-prem DNS Cutover |
+| **5** | `phase5-deploy.ps1` | `phase5-test.ps1` | Hub DNS Configuration |
+| **6** | `phase6-deploy.ps1` | `phase6-test.ps1` | Hub DNS Cutover |
+| **7** | `phase7-deploy.ps1` | `phase7-test.ps1` | Spoke Networks + Storage |
+| **8+** | *(Future)* | *(Future)* | Azure Private DNS Migration |
+
+### Legacy/Granular Phase 1 Scripts (Optional)
+
+The original Phase 1 was split into sub-phases. These are still available:
+
+---
+
+## Typical Workflows
+
+### Scenario 1: First-Time POC Setup
+
+```powershell
+# 1. Generate SSH key (if needed)
+ssh-keygen -t rsa -b 4096 -f ~/.ssh/dnsmig -C "dnsmig"
+
+# 2. Deploy complete environment (Phases 1-6 consolidated)
+./phase1-6-deploy.ps1 -Force
+
+# 3. Validate everything
+./phase6-test.ps1
+
+# 4. Continue to Phase 7 (spoke networks)
+./phase7-deploy.ps1 -Force
+./phase7-test.ps1
+```
+
+### Scenario 2: Rebuild Environment
+
+```powershell
+# 1. Clean up everything
+./phase1-6-teardown.ps1 -Force
+
+# 2. Wait for deletion to complete (or use -WaitForDeletion $true above)
+Start-Sleep -Seconds 120
+
+# 3. Deploy fresh
+./phase1-6-deploy.ps1 -Force
+```
+
+### Scenario 3: Debugging Specific Phase
+
+```powershell
+# Deploy up to phase you want to debug
+./phase1-deploy.ps1 -Force
+./phase2-deploy.ps1 -Force
+./phase3-deploy.ps1 -Force
+
+# Debug phase 3 specifically
+./phase3-test.ps1
+
+# Continue manually or skip ahead
+./phase4-deploy.ps1 -Force
+```
+
+### Scenario 4: Phase 7+ Development
+
+```powershell
+# If Phases 1-6 already deployed, continue with:
+./phase7-deploy.ps1 -Force
+./phase7-test.ps1
+
+# For Phase 7 development iterations:
+az group delete --name rg-spoke1-dnsmig --yes --no-wait
+az group delete --name rg-spoke2-dnsmig --yes --no-wait
+./phase7-deploy.ps1 -Force
+```
+
+---
+
+### 1. **phase1-1-deploy.ps1** — Deploy Phase 1.1 (On-prem Only) (On-prem Only)
 
 Deploys the complete on-prem infrastructure using the Bicep template.
 

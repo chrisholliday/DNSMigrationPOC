@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.40.2.10011",
-      "templateHash": "11266581182194848941"
+      "templateHash": "7050001259843120272"
     },
     "description": "Phase 1: Deploy both On-Prem and Hub VNets with Azure DNS (multi-RG)"
   },
@@ -86,7 +86,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.40.2.10011",
-              "templateHash": "4653199660356110746"
+              "templateHash": "11869582947705481112"
             },
             "description": "On-Prem infrastructure module (resource group scope)"
           },
@@ -533,7 +533,7 @@
                 "typeHandlerVersion": "2.1",
                 "autoUpgradeMinorVersion": true,
                 "settings": {
-                  "script": "[base64('#!/bin/bash\napt-get update\napt-get upgrade -y\napt-get install -y curl dnsutils net-tools\n')]"
+                  "script": "[base64('#!/bin/bash\napt-get update\napt-get upgrade -y\napt-get install -y curl dnsutils\n')]"
                 }
               },
               "dependsOn": [
@@ -609,7 +609,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.40.2.10011",
-              "templateHash": "11663195958390122847"
+              "templateHash": "2379404927566303499"
             },
             "description": "Hub infrastructure module (resource group scope)"
           },
@@ -1056,7 +1056,7 @@
                 "typeHandlerVersion": "2.1",
                 "autoUpgradeMinorVersion": true,
                 "settings": {
-                  "script": "[base64('#!/bin/bash\napt-get update\napt-get upgrade -y\napt-get install -y curl dnsutils net-tools\n')]"
+                  "script": "[base64('#!/bin/bash\napt-get update\napt-get upgrade -y\napt-get install -y curl dnsutils\n')]"
                 }
               },
               "dependsOn": [

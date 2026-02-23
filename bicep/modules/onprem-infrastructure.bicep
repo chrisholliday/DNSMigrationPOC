@@ -415,7 +415,7 @@ resource clientVmExtension 'Microsoft.Compute/virtualMachines/extensions@2021-07
     typeHandlerVersion: '2.1'
     autoUpgradeMinorVersion: true
     settings: {
-      script: base64('#!/bin/bash\napt-get update\napt-get upgrade -y\napt-get install -y curl dnsutils net-tools\n')
+      script: base64('#!/bin/bash\napt-get update\napt-get upgrade -y\napt-get install -y curl dnsutils\n')
     }
   }
 }

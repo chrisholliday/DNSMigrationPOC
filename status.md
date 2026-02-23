@@ -136,6 +136,88 @@ Date: 2026-02-20
 
 ---
 
+## ✅ Phase 5 - COMPLETE (Hub DNS + Bidirectional Forwarding)
+
+**Deployment Date:** 2026-02-22  
+**Status:** All tests passed
+
+### What Was Deployed
+
+**Goal:** Configure Hub DNS server with bidirectional forwarding between environments
+
+**Changes:**
+
+- Installed BIND9 on hub-vm-dns (10.1.10.4)
+- Configured azure.pvt authoritative zone
+- Added DNS records for hub resources (dns, client, ns1)
+- Configured Hub to forward onprem.pvt queries to 10.0.10.4
+- Configured On-prem to forward azure.pvt queries to 10.1.10.4
+- Both servers forward internet names to Azure DNS (168.63.129.16)
+- **Added DNSSEC exemptions** for private zones (fixed DNSSEC validation issue)
+- **Hub VNet remains on Azure DNS** (custom DNS not active yet)
+
+**Test Results:** ✓ All tests passed
+
+- Hub DNS server operational and answering azure.pvt queries
+- Bidirectional forwarding works between both DNS servers
+- On-prem DNS can resolve azure.pvt records (via forwarding to 10.1.10.4)
+- Hub DNS can resolve onprem.pvt records (via forwarding to 10.0.10.4)
+- Both servers forward internet names to Azure DNS
+- Network connectivity verified between DNS servers (port 53)
+- Configuration files validated on both servers
+
+### Scripts Used
+
+- `scripts/phase5-deploy.ps1` - Hub DNS deployment + bidirectional config (includes DNSSEC exemptions)
+- `scripts/phase5-test.ps1` - Hub DNS and forwarding validation (includes connectivity tests)
+
+### Key Fix Applied
+
+**DNSSEC Validation Issue:** Initial deployment failed bidirectional forwarding due to DNSSEC validation errors on private zones. Fixed by adding `validate-except` directives:
+
+- Hub DNS: `validate-except { "onprem.pvt"; };`
+- On-prem DNS: `validate-except { "azure.pvt"; };`
+
+---
+
+## 🚀 Phase 6 - READY (Hub DNS Cutover - Final Phase)
+
+**Status:** Scripts created and validated, ready for deployment
+
+### What Phase 6 Will Do
+
+**Goal:** Activate custom DNS for Hub VNet - complete the DNS migration
+
+**Changes:**
+
+- Update Hub VNet DNS settings to 10.1.10.4 (hub-vm-dns)
+- Restart Hub VMs to acquire new DNS settings via DHCP
+- VMs will now use custom DNS for all resolution
+- **This is the final cutover that completes the migration**
+
+**Expected Results:**
+
+- Hub VMs resolve azure.pvt records using custom DNS server
+- Hub VMs resolve onprem.pvt records via forwarding to 10.0.10.4
+- On-prem VMs resolve azure.pvt records via forwarding to 10.1.10.4
+- Full bidirectional DNS resolution operational
+- Internet names still work via forwarding to Azure DNS
+- Both VNets fully operational with custom DNS
+
+### Scripts Available
+
+- `scripts/phase6-deploy.ps1` - Hub DNS cutover deployment ✓
+- `scripts/phase6-test.ps1` - Complete migration validation ✓
+
+### To Deploy Phase 6
+
+```powershell
+./scripts/phase6-deploy.ps1
+./scripts/phase6-test.ps1
+```
+
+---
+
 ## Previous Work Notes
 
 ## Phase 1.1 - Ready for Clean Rebuild

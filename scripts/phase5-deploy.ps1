@@ -197,7 +197,6 @@ options {
     forwarders {
         168.63.129.16;
     };
-    forward only;
     
     // DNSSEC validation (exempt private zones)
     dnssec-validation auto;
@@ -354,7 +353,6 @@ options {
     forwarders {
         168.63.129.16;
     };
-    forward only;
     
     // DNSSEC validation (exempt private zones)
     dnssec-validation auto;

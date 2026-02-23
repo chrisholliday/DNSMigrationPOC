@@ -427,7 +427,7 @@ ns1     IN      A       10.1.10.4
 
 ;; Host records
 dns     IN      A       10.1.10.4
-app     IN      A       10.1.10.5
+client  IN      A       10.1.10.5
 "@
 
 $azureZoneBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($azureZoneFile))

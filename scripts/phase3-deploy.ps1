@@ -162,7 +162,6 @@ options {
     forwarders {
         168.63.129.16;
     };
-    forward only;
     
     // DNSSEC validation
     dnssec-validation auto;

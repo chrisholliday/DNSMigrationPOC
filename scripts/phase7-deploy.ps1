@@ -227,7 +227,7 @@ Write-Host 'Generating DNS zone configurations...' -ForegroundColor Cyan
 $privatelinkZoneFile = @"
 ;; privatelink.blob.core.windows.net zone
 ;; Auto-generated on $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
-\$TTL 300
+`$TTL 300
 @       IN      SOA     ns1.privatelink.blob.core.windows.net. admin.privatelink.blob.core.windows.net. (
                         $(Get-Date -Format 'yyyyMMddHH')  ; Serial
                         3600       ; Refresh
@@ -247,7 +247,7 @@ $spoke2StorageAccountName   IN      A       $spoke2NicInfo
 $blobZoneFile = @"
 ;; blob.core.windows.net zone (partial - only private endpoints)
 ;; Auto-generated on $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
-\$TTL 300
+`$TTL 300
 @       IN      SOA     ns1.blob.core.windows.net. admin.blob.core.windows.net. (
                         $(Get-Date -Format 'yyyyMMddHH')  ; Serial
                         3600       ; Refresh
@@ -392,6 +392,55 @@ else {
     Write-Host '  ⚠ BIND9 reload may have issues. Check output:' -ForegroundColor Yellow
     Write-Host $reloadOutput -ForegroundColor Gray
 }
+
+Write-Host ''
+Write-Host '[5.1] Updating on-prem DNS to forward blob queries to hub...' -ForegroundColor Yellow
+
+$updateOnpremScript = @'
+#!/bin/bash
+set -e
+
+# Configure conditional forwarding for blob.core.windows.net
+if ! grep -q 'zone "blob.core.windows.net"' /etc/bind/named.conf.local; then
+    cat >> /etc/bind/named.conf.local << 'EOFZONE'
+
+// Forward blob queries to hub DNS (covers private endpoints)
+zone "blob.core.windows.net" {
+    type forward;
+    forward only;
+    forwarders { 10.1.10.4; };
+};
+EOFZONE
+fi
+
+# Configure conditional forwarding for privatelink.blob.core.windows.net
+if ! grep -q 'zone "privatelink.blob.core.windows.net"' /etc/bind/named.conf.local; then
+    cat >> /etc/bind/named.conf.local << 'EOFZONE'
+
+// Forward privatelink blob queries to hub DNS
+zone "privatelink.blob.core.windows.net" {
+    type forward;
+    forward only;
+    forwarders { 10.1.10.4; };
+};
+EOFZONE
+fi
+
+# Validate and reload
+sudo named-checkconf
+sudo systemctl reload bind9
+
+echo "On-prem DNS updated to forward blob queries to hub"
+'@
+
+az vm run-command invoke `
+    --resource-group $OnpremResourceGroupName `
+    --name 'onprem-vm-dns' `
+    --command-id RunShellScript `
+    --scripts $updateOnpremScript `
+    --output none 2>$null
+
+Write-Host '  ✓ On-prem DNS forwarding configured' -ForegroundColor Green
 
 Write-Host ''
 

@@ -129,6 +129,58 @@ az group delete --name rg-spoke2-dnsmig --yes --no-wait
 
 ---
 
+## DNS Resolution Demonstration
+
+### **demo-dns-resolution.ps1** — Interactive DNS Testing
+
+Run comprehensive DNS resolution tests to demonstrate how name resolution works and identify the source of authority for each zone.
+
+**Purpose:**
+
+- Prove DNS resolution works across all zones (onprem.pvt, azure.pvt, privatelink)
+- Show which DNS server is authoritative for each zone
+- Trace the complete CNAME chain for storage account private endpoints
+- Compare resolution behavior at different phases (Phase 7 vs 9-10)
+
+**Usage:**
+
+```powershell
+# Test from hub-vm-web (default)
+./demo-dns-resolution.ps1
+
+# Test from a different VM
+./demo-dns-resolution.ps1 -VMName onprem-vm-web -ResourceGroup onprem-rg
+
+# Test from spoke VM
+./demo-dns-resolution.ps1 -VMName spoke1-vm-web1 -ResourceGroup spoke1-rg
+```
+
+**What It Shows:**
+
+- VM DNS configuration (which nameserver is used)
+- Resolution of all zone types (onprem.pvt, azure.pvt, storage accounts)
+- Authoritative Answer (AA) flags in dig output
+- Forwarding behavior between DNS servers
+- CNAME → Private IP resolution chain for private endpoints
+
+**Key Observations:**
+
+- `aa` flag in dig output = authoritative answer from local zone
+- No `aa` flag = forwarded query to another DNS server
+- Storage accounts should resolve via CNAME chain to privatelink zone
+- All IPs should be private (10.x.x.x range)
+
+**Use at Multiple Phases:**
+Run this script at Phase 7, 9, and 10 to demonstrate that:
+
+- Name resolution continues to work throughout migration
+- Source of authority changes from BIND9 to Azure Private DNS
+- Applications require no reconfiguration
+
+See [../docs/DNS-Resolution-Demonstration.md](../docs/DNS-Resolution-Demonstration.md) for detailed manual commands and explanation.
+
+---
+
 ### 1. **phase1-1-deploy.ps1** — Deploy Phase 1.1 (On-prem Only) (On-prem Only)
 
 Deploys the complete on-prem infrastructure using the Bicep template.

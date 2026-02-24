@@ -17,6 +17,9 @@ Azure region. Default: centralus
 .PARAMETER HubResourceGroupName
 Hub resource group name. Default: rg-hub-dnsmig
 
+.PARAMETER OnpremResourceGroupName
+On-prem resource group name. Default: rg-onprem-dnsmig
+
 .PARAMETER Spoke1ResourceGroupName
 Spoke1 resource group name. Default: rg-spoke1-dnsmig
 
@@ -33,6 +36,7 @@ Path to SSH public key. Default: ~/.ssh/id_rsa.pub
 param(
     [string]$Location = 'centralus',
     [string]$HubResourceGroupName = 'rg-hub-dnsmig',
+    [string]$OnpremResourceGroupName = 'rg-onprem-dnsmig',
     [string]$Spoke1ResourceGroupName = 'rg-spoke1-dnsmig',
     [string]$Spoke2ResourceGroupName = 'rg-spoke2-dnsmig',
     [string]$SshPublicKeyPath = '~/.ssh/id_rsa.pub'

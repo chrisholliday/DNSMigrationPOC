@@ -76,9 +76,9 @@ cat /etc/resolv.conf
 
 ```powershell
 # Query each VM
-$vms = @('onprem-vm-web', 'hub-vm-web', 'spoke1-vm-web1', 'spoke2-vm-web1')
+$vms = @('onprem-vm-client', 'onprem-vm-dns', 'hub-vm-app', 'hub-vm-dns', 'spoke1-vm-app', 'spoke2-vm-app')
 foreach ($vm in $vms) {
-    $rg = if ($vm -like 'onprem-*') { 'onprem-rg' } elseif ($vm -like 'spoke1-*') { 'spoke1-rg' } elseif ($vm -like 'spoke2-*') { 'spoke2-rg' } else { 'hub-rg' }
+    $rg = if ($vm -like 'onprem-*') { 'rg-onprem-dnsmig' } elseif ($vm -like 'spoke1-*') { 'rg-spoke1-dnsmig' } elseif ($vm -like 'spoke2-*') { 'rg-spoke2-dnsmig' } else { 'rg-hub-dnsmig' }
     Write-Host "`n$vm DNS Configuration:" -ForegroundColor Cyan
     az vm run-command invoke --resource-group $rg --name $vm `
         --command-id RunShellScript --scripts 'cat /etc/resolv.conf' `
@@ -120,7 +120,7 @@ nslookup <spoke2-storage-account>.blob.core.windows.net
 **PowerShell Test Script:**
 
 ```powershell
-# From jumpbox - test resolution from hub-vm-web
+# From jumpbox - test resolution from hub-vm-app
 $testScript = @'
 #!/bin/bash
 echo "=== On-Prem Zone Resolution ==="
@@ -130,10 +130,10 @@ echo "=== Azure Zone Resolution ==="
 nslookup web.azure.pvt
 echo ""
 echo "=== Storage Account Resolution ==="
-nslookup $(az storage account list -g spoke1-rg --query '[0].name' -o tsv).blob.core.windows.net
+nslookup $(az storage account list -g rg-spoke1-dnsmig --query '[0].name' -o tsv).blob.core.windows.net
 '@
 
-az vm run-command invoke --resource-group hub-rg --name hub-vm-web `
+az vm run-command invoke --resource-group rg-hub-dnsmig --name hub-vm-app `
     --command-id RunShellScript --scripts $testScript `
     --query 'value[0].message' -o tsv
 ```
@@ -205,7 +205,7 @@ dig @10.0.10.4 <storage>.blob.core.windows.net   # On-prem DNS (forwarded to hub
 **PowerShell Test Script:**
 
 ```powershell
-# Test from hub-vm-web (has access to both DNS servers)
+# Test from hub-vm-app (has access to both DNS servers)
 $testScript = @'
 #!/bin/bash
 echo "=== Query On-Prem DNS for On-Prem Zone (Authority Check) ==="
@@ -224,7 +224,7 @@ echo "=== Query Hub DNS for On-Prem Zone (Forwarding Check) ==="
 dig @10.1.10.4 web.onprem.pvt | grep -E "flags:|ANSWER SECTION" -A 2
 '@
 
-az vm run-command invoke --resource-group hub-rg --name hub-vm-web `
+az vm run-command invoke --resource-group rg-hub-dnsmig --name hub-vm-app `
     --command-id RunShellScript --scripts $testScript `
     --query 'value[0].message' -o tsv
 ```
@@ -239,7 +239,7 @@ az vm run-command invoke --resource-group hub-rg --name hub-vm-web `
 
 ```bash
 # Get storage account name first
-STORAGE=$(az storage account list -g spoke1-rg --query '[0].name' -o tsv)
+STORAGE=$(az storage account list -g rg-spoke1-dnsmig --query '[0].name' -o tsv)
 
 # Trace the full resolution chain
 dig $STORAGE.blob.core.windows.net
@@ -261,7 +261,7 @@ mystorageacct.privatelink.blob.core.windows.net. 300 IN A 10.2.10.5
 **PowerShell Detailed Trace:**
 
 ```powershell
-$storage = (az storage account list -g spoke1-rg --query '[0].name' -o tsv)
+$storage = (az storage account list -g rg-spoke1-dnsmig --query '[0].name' -o tsv)
 Write-Host "Tracing resolution for: $storage.blob.core.windows.net" -ForegroundColor Cyan
 
 $traceScript = @"
@@ -279,7 +279,7 @@ echo "Step 3: Show full trace with authorities"
 dig \$STORAGE.blob.core.windows.net
 "@
 
-az vm run-command invoke --resource-group hub-rg --name hub-vm-web `
+az vm run-command invoke --resource-group rg-hub-dnsmig --name hub-vm-web `
     --command-id RunShellScript --scripts $traceScript `
     --query 'value[0].message' -o tsv
 ```
@@ -309,12 +309,12 @@ sudo named-checkzone azure.pvt /etc/bind/db.azure.pvt
 
 ```powershell
 Write-Host "=== On-Prem DNS Zone File ===" -ForegroundColor Cyan
-az vm run-command invoke --resource-group onprem-rg --name onprem-vm-dns `
+az vm run-command invoke --resource-group rg-onprem-dnsmig --name onprem-vm-dns `
     --command-id RunShellScript --scripts 'sudo cat /etc/bind/db.onprem.pvt' `
     --query 'value[0].message' -o tsv
 
 Write-Host "`n=== Hub DNS Zone Files ===" -ForegroundColor Cyan
-az vm run-command invoke --resource-group hub-rg --name hub-vm-dns `
+az vm run-command invoke --resource-group rg-hub-dnsmig --name hub-vm-dns `
     --command-id RunShellScript --scripts 'sudo cat /etc/bind/db.azure.pvt' `
     --query 'value[0].message' -o tsv
 ```
@@ -380,10 +380,10 @@ Feb 23 10:15:23 hub-vm-dns named[1234]: client 10.0.10.5#54322 (web.onprem.pvt):
 
 param(
     [Parameter(Mandatory=$false)]
-    [string]$ResourceGroup = 'hub-rg',
+    [string]$ResourceGroup = 'rg-hub-dnsmig',
     
     [Parameter(Mandatory=$false)]
-    [string]$VMName = 'hub-vm-web'
+    [string]$VMName = 'hub-vm-app'
 )
 
 Write-Host '════════════════════════════════════════════════════════════' -ForegroundColor Cyan
@@ -392,8 +392,8 @@ Write-Host '══════════════════════�
 Write-Host ''
 
 # Get storage account for testing
-$storage1 = (az storage account list -g spoke1-rg --query '[0].name' -o tsv)
-$storage2 = (az storage account list -g spoke2-rg --query '[0].name' -o tsv)
+$storage1 = (az storage account list -g rg-spoke1-dnsmig --query '[0].name' -o tsv)
+$storage2 = (az storage account list -g rg-spoke2-dnsmig --query '[0].name' -o tsv)
 
 $demoScript = @"
 #!/bin/bash
@@ -403,13 +403,12 @@ cat /etc/resolv.conf | grep nameserver
 
 echo ""
 echo "=== On-Prem Zone Resolution ==="
-dig +short web.onprem.pvt
-dig +short dns.onprem.pvt
 dig +short client.onprem.pvt
+dig +short dns.onprem.pvt
 
 echo ""
 echo "=== Azure Zone Resolution ==="
-dig +short web.azure.pvt
+dig +short app.azure.pvt
 dig +short dns.azure.pvt
 dig +short client.azure.pvt
 

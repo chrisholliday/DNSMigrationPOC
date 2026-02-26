@@ -27,31 +27,33 @@
 
 ## Virtual Machines
 
+> ⚠️ **Note:** Some VM names differ from DNS names for clarity in different contexts.
+
 ### On-Premises VMs
 
-| VM Name | Private IP | DNS Name | Role | DNS Server |
+| VM Name | Private IP | **Actual DNS Name** | Role | DNS Server |
 |---------|-----------|----------|------|------------|
-| onprem-vm-dns | 10.0.10.4 | dns.onprem.pvt | DNS Server (BIND9) | Self |
-| onprem-vm-client | 10.0.10.5 | client.onprem.pvt | Client/Web | 10.0.10.4 |
+| onprem-vm-dns | 10.0.10.4 | **dns.onprem.pvt** | DNS Server (BIND9) | Self (10.0.10.4) |
+| onprem-vm-client | 10.0.10.5 | **client.onprem.pvt** | Client/Web | 10.0.10.4 |
 
 ### Hub VMs
 
-| VM Name | Private IP | DNS Name | Role | DNS Server |
+| VM Name | Private IP | **Actual DNS Name** | Role | DNS Server |
 |---------|-----------|----------|------|------------|
-| hub-vm-dns | 10.1.10.4 | dns.azure.pvt | DNS Server (BIND9) | Self |
-| hub-vm-app | 10.1.10.5 | app.azure.pvt | Application Server | 10.1.10.4 |
+| hub-vm-dns | 10.1.10.4 | **dns.azure.pvt** | DNS Server (BIND9) | Self (10.1.10.4) |
+| hub-vm-app | 10.1.10.5 | **client.azure.pvt** | Application Server | 10.1.10.4 |
 
 ### Spoke 1 VMs
 
-| VM Name | Private IP | DNS Name | Role | DNS Server |
+| VM Name | Private IP | **Actual DNS Name** | Role | DNS Server |
 |---------|-----------|----------|------|------------|
-| spoke1-vm-app | 10.2.10.4 | app.spoke1.pvt | Application Server | 10.1.10.4 |
+| spoke1-vm-app | 10.2.10.4 | **app1.azure.pvt** | Application Server | 10.1.10.4 |
 
 ### Spoke 2 VMs
 
-| VM Name | Private IP | DNS Name | Role | DNS Server |
+| VM Name | Private IP | **Actual DNS Name** | Role | DNS Server |
 |---------|-----------|----------|------|------------|
-| spoke2-vm-app | 10.3.10.4 | app.spoke2.pvt | Application Server | 10.1.10.4 |
+| spoke2-vm-app | 10.3.10.4 | **app2.azure.pvt** | Application Server | 10.1.10.4 |
 
 ---
 
@@ -68,12 +70,29 @@
 
 ### Phase 7: BIND9 DNS Servers
 
-| Zone | Authoritative Server | Server IP | Records |
+| Zone | Authoritative Server | Server IP | **Actual Records** |
 |------|---------------------|-----------|---------|
-| onprem.pvt | onprem-vm-dns | 10.0.10.4 | dns, web, client |
-| azure.pvt | hub-vm-dns | 10.1.10.4 | dns, web, client |
-| blob.core.windows.net | hub-vm-dns | 10.1.10.4 | CNAME records |
-| privatelink.blob.core.windows.net | hub-vm-dns | 10.1.10.4 | A records |
+| onprem.pvt | onprem-vm-dns | 10.0.10.4 | dns (10.0.10.4), client (10.0.10.5) |
+| azure.pvt | hub-vm-dns | 10.1.10.4 | dns (10.1.10.4), client (10.1.10.5), app1 (10.2.10.4), app2 (10.3.10.4) |
+| blob.core.windows.net | **Forwarded to Azure DNS** | 168.63.129.16 | CNAMEs provided by Azure (not hosted locally) |
+| privatelink.blob.core.windows.net | hub-vm-dns | 10.1.10.4 | spoke1saskhwswl4vqpe6 (10.2.10.5), spoke2saiwln2ddfdjx5o (10.3.10.5) |
+
+#### Storage Account DNS Resolution Flow
+
+This follows Azure's native Private Endpoint DNS pattern:
+
+1. **Client queries**: `spoke1saskhwswl4vqpe6.blob.core.windows.net`
+2. **Hub DNS forwards** to Azure DNS (168.63.129.16)
+3. **Azure DNS returns CNAME**: `spoke1saskhwswl4vqpe6.privatelink.blob.core.windows.net`
+4. **Hub DNS hosts** privatelink zone locally
+5. **Returns A record**: `10.2.10.5` (private endpoint IP)
+
+This approach:
+
+- ✅ Matches Azure Private DNS Zone architecture
+- ✅ Automatic CNAMEs from Azure (no manual maintenance)
+- ✅ Only override privatelink resolution with private IPs
+- ✅ Scalable to new storage accounts without config changes
 
 ### Phase 9: Hybrid DNS (Future)
 
@@ -100,6 +119,71 @@
 | DNS Private Resolver | *Not yet deployed* | - | hub-vnet | Not deployed |
 | Inbound Endpoint | *Not yet deployed* | - | hub-vnet | Not deployed |
 | Outbound Endpoint | *Not yet deployed* | - | hub-vnet | Not deployed |
+
+---
+
+## DNS Testing Quick Reference
+
+### Names That Actually Resolve
+
+```bash
+# On-Prem Zone (works from any VM)
+nslookup dns.onprem.pvt       # Returns 10.0.10.4 (onprem-vm-dns)
+nslookup client.onprem.pvt    # Returns 10.0.10.5 (onprem-vm-client)
+
+# Azure Hub Zone (works from any VM)
+nslookup dns.azure.pvt        # Returns 10.1.10.4 (hub-vm-dns)
+nslookup client.azure.pvt     # Returns 10.1.10.5 (hub-vm-app)
+
+# Azure Spoke VMs (added in Phase 7)
+nslookup app1.azure.pvt       # Returns 10.2.10.4 (spoke1-vm-app)
+nslookup app2.azure.pvt       # Returns 10.3.10.4 (spoke2-vm-app)
+
+# Storage Accounts (work from any VM)
+nslookup spoke1saskhwswl4vqpe6.blob.core.windows.net      # Returns 10.2.10.5 (via CNAME chain)
+nslookup spoke2saiwln2ddfdjx5o.blob.core.windows.net      # Returns 10.3.10.5 (via CNAME chain)
+```
+
+### Testing DNS Resolution from VMs
+
+```powershell
+# Test from hub-vm-app (client.azure.pvt)
+az vm run-command invoke --resource-group rg-hub-dnsmig --name hub-vm-app `
+    --command-id RunShellScript `
+    --scripts @"
+echo '=== My DNS Config ==='
+cat /etc/resolv.conf | grep nameserver
+echo ''
+echo '=== Test On-Prem Resolution ==='
+nslookup client.onprem.pvt
+nslookup dns.onprem.pvt
+echo ''
+echo '=== Test Azure Hub Resolution ==='
+nslookup client.azure.pvt
+nslookup dns.azure.pvt
+echo ''
+echo '=== Test Azure Spoke VM Resolution ==='
+nslookup app1.azure.pvt
+nslookup app2.azure.pvt
+echo ''
+echo '=== Test Storage Account Resolution ==='
+nslookup spoke1saskhwswl4vqpe6.blob.core.windows.net
+"@ `
+    --query 'value[0].message' -o tsv
+
+# Test ping to spoke VMs (by DNS name)
+az vm run-command invoke --resource-group rg-hub-dnsmig --name hub-vm-app `
+    --command-id RunShellScript `
+    --scripts 'ping -c 2 app1.azure.pvt; ping -c 2 app2.azure.pvt' `
+    --query 'value[0].message' -o tsv
+```
+
+### Known Issues & Limitations
+
+| Issue | Impact | Workaround |
+|-------|--------|------------|
+| VM names differ from DNS names | Confusing during demos | Refer to inventory table for DNS mappings |
+| Storage accounts work correctly | None - this is correct! | Use full FQDN with blob.core.windows.net |
 
 ---
 
@@ -156,5 +240,6 @@ az network private-endpoint list -g rg-spoke2-dnsmig --query '[].{Name:name, IP:
 
 ## Last Updated
 
-**Date:** 2026-02-24 16:06:37  
-**Updated By:** update-inventory.ps1
+**Date:** 2026-02-25 (DNS records verified)  
+**Updated By:** Manual verification of BIND9 zone files  
+**Status:** ⚠️ DNS names do not match VM names - use this inventory for testing

@@ -227,10 +227,13 @@ Write-Host ''
 
 Write-Host 'Generating DNS zone configurations...' -ForegroundColor Cyan
 
-# Generate privatelink zone file (actual A records)
+# Generate privatelink zone file (actual A records for private endpoints)
+# Note: blob.core.windows.net CNAMEs come from Azure DNS, not local zone
 $privatelinkZoneFile = @"
 ;; privatelink.blob.core.windows.net zone
 ;; Auto-generated on $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+;; This zone contains A records for private endpoints
+;; Azure public DNS provides CNAMEs from blob.core.windows.net to privatelink.blob.core.windows.net
 `$TTL 300
 @       IN      SOA     ns1.privatelink.blob.core.windows.net. admin.privatelink.blob.core.windows.net. (
                         $(Get-Date -Format 'yyyyMMddHH')  ; Serial
@@ -242,32 +245,13 @@ $privatelinkZoneFile = @"
         IN      NS      ns1.privatelink.blob.core.windows.net.
 ns1     IN      A       10.1.10.4
 
-;; Private Endpoint Records
+;; Private Endpoint A Records
 $spoke1StorageAccountName   IN      A       $spoke1NicInfo
 $spoke2StorageAccountName   IN      A       $spoke2NicInfo
 "@
 
-# Generate blob.core.windows.net zone file (CNAMEs to privatelink)
-$blobZoneFile = @"
-;; blob.core.windows.net zone (partial - only private endpoints)
-;; Auto-generated on $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
-`$TTL 300
-@       IN      SOA     ns1.blob.core.windows.net. admin.blob.core.windows.net. (
-                        $(Get-Date -Format 'yyyyMMddHH')  ; Serial
-                        3600       ; Refresh
-                        1800       ; Retry
-                        604800     ; Expire
-                        300 )      ; Minimum TTL
-
-        IN      NS      ns1.blob.core.windows.net.
-ns1     IN      A       10.1.10.4
-
-;; CNAME records pointing to privatelink zone
-$spoke1StorageAccountName   IN      CNAME   $spoke1StorageAccountName.privatelink.blob.core.windows.net.
-$spoke2StorageAccountName   IN      CNAME   $spoke2StorageAccountName.privatelink.blob.core.windows.net.
-"@
-
-Write-Host '  ✓ Zone files generated' -ForegroundColor Green
+Write-Host '  ✓ Zone file generated (privatelink.blob.core.windows.net)' -ForegroundColor Green
+Write-Host '  ℹ blob.core.windows.net will be forwarded to Azure DNS for CNAMEs' -ForegroundColor Cyan
 Write-Host ''
 
 # ================================================
@@ -281,9 +265,8 @@ Write-Host ''
 # Create zone files on DNS server
 Write-Host 'Creating zone files on hub-vm-dns...' -ForegroundColor Cyan
 
-# Use base64 encoding to safely transfer the files
+# Use base64 encoding to safely transfer the file
 $privatelinkZoneBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($privatelinkZoneFile))
-$blobZoneBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($blobZoneFile))
 
 $createZoneScript = @"
 #!/bin/bash
@@ -295,13 +278,7 @@ sudo mv /tmp/db.privatelink.blob.core.windows.net /etc/bind/db.privatelink.blob.
 sudo chown bind:bind /etc/bind/db.privatelink.blob.core.windows.net
 sudo chmod 644 /etc/bind/db.privatelink.blob.core.windows.net
 
-# Decode and write blob zone file
-echo '$blobZoneBase64' | base64 -d > /tmp/db.blob.core.windows.net
-sudo mv /tmp/db.blob.core.windows.net /etc/bind/db.blob.core.windows.net
-sudo chown bind:bind /etc/bind/db.blob.core.windows.net
-sudo chmod 644 /etc/bind/db.blob.core.windows.net
-
-echo "Zone files created"
+echo "Privatelink zone file created"
 "@
 
 az vm run-command invoke `
@@ -311,9 +288,9 @@ az vm run-command invoke `
     --scripts $createZoneScript `
     --output none 2>$null
 
-Write-Host '  ✓ Zone files deployed' -ForegroundColor Green
+Write-Host '  ✓ Zone file deployed' -ForegroundColor Green
 
-# Update named.conf.local to include both zones
+# Update named.conf.local with privatelink zone (host) and blob zone (forward)
 Write-Host 'Updating named.conf.local...' -ForegroundColor Cyan
 
 $namedConfUpdate = @'
@@ -329,15 +306,14 @@ fi
 # Append zone configurations
 cat >> /etc/bind/named.conf.local << 'EOFZONE'
 
-// Blob Storage Zone (Legacy - covers public FQDNs with CNAMEs to privatelink)
+// Forward blob.core.windows.net to Azure DNS (gets CNAMEs from Azure)
 zone "blob.core.windows.net" {
-    type master;
-    file "/etc/bind/db.blob.core.windows.net";
-    allow-query { any; };
-    allow-transfer { none; };
+    type forward;
+    forward only;
+    forwarders { 168.63.129.16; };
 };
 
-// Private Link Zone (Legacy - contains A records for private endpoints)
+// Host privatelink zone locally (contains A records for private endpoints)
 zone "privatelink.blob.core.windows.net" {
     type master;
     file "/etc/bind/db.privatelink.blob.core.windows.net";
@@ -368,8 +344,7 @@ set -e
 # Validate configuration
 sudo named-checkconf
 
-# Validate zone files
-sudo named-checkzone blob.core.windows.net /etc/bind/db.blob.core.windows.net
+# Validate privatelink zone file
 sudo named-checkzone privatelink.blob.core.windows.net /etc/bind/db.privatelink.blob.core.windows.net
 
 # Reload BIND9
@@ -398,7 +373,61 @@ else {
 }
 
 Write-Host ''
-Write-Host '[5.1] Updating on-prem DNS to forward blob queries to hub...' -ForegroundColor Yellow
+
+# ================================================
+# STEP 5.1: Add Spoke VM DNS Records
+# ================================================
+Write-Host '[5.1] Adding spoke VM records to azure.pvt zone...' -ForegroundColor Yellow
+
+$addSpokeRecordsScript = @'
+#!/bin/bash
+set -e
+
+# Check if spoke records already exist
+if grep -q 'app1' /etc/bind/db.azure.pvt; then
+    echo "Spoke VM records already exist in azure.pvt zone"
+    exit 0
+fi
+
+# Add spoke VM A records to azure.pvt zone
+sudo bash -c 'cat >> /etc/bind/db.azure.pvt << "EOFRECORDS"
+
+;; Spoke VM records
+app1    IN      A       10.2.10.4
+app2    IN      A       10.3.10.4
+EOFRECORDS
+'
+
+# Update serial number in SOA record - use date-based serial
+newSerial=$(date +%Y%m%d%H)
+sudo sed -i "s/[0-9]\{10\}  ; Serial/$newSerial  ; Serial/" /etc/bind/db.azure.pvt
+
+# Validate and reload
+sudo named-checkzone azure.pvt /etc/bind/db.azure.pvt
+sudo systemctl reload bind9
+
+echo "Spoke VM DNS records added successfully"
+'@
+
+$addRecordsOutput = az vm run-command invoke `
+    --resource-group $HubResourceGroupName `
+    --name 'hub-vm-dns' `
+    --command-id RunShellScript `
+    --scripts $addSpokeRecordsScript `
+    --query 'value[0].message' -o tsv 2>$null
+
+if ($addRecordsOutput -match 'successfully|already exist') {
+    Write-Host '  ✓ Spoke VM DNS records configured' -ForegroundColor Green
+    Write-Host '    - app1.azure.pvt -> 10.2.10.4 (spoke1-vm-app)' -ForegroundColor Gray
+    Write-Host '    - app2.azure.pvt -> 10.3.10.4 (spoke2-vm-app)' -ForegroundColor Gray
+}
+else {
+    Write-Host '  ⚠ Adding spoke records may have issues. Check output:' -ForegroundColor Yellow
+    Write-Host $addRecordsOutput -ForegroundColor Gray
+}
+
+Write-Host ''
+Write-Host '[5.2] Updating on-prem DNS to forward blob queries to hub...' -ForegroundColor Yellow
 
 $updateOnpremScript = @'
 #!/bin/bash
@@ -461,11 +490,20 @@ Write-Host "  ✓ Spoke1 Storage: $spoke1StorageAccountName" -ForegroundColor Gr
 Write-Host "  ✓ Spoke2 VNet: $spoke2VnetName" -ForegroundColor Green
 Write-Host "  ✓ Spoke2 Storage: $spoke2StorageAccountName" -ForegroundColor Green
 Write-Host '  ✓ VNet peering: Hub <-> Spoke1, Hub <-> Spoke2' -ForegroundColor Green
-Write-Host '  ✓ DNS zones: blob.core.windows.net, privatelink.blob.core.windows.net' -ForegroundColor Green
+Write-Host '  ✓ DNS zone: privatelink.blob.core.windows.net (hosted)' -ForegroundColor Green
+Write-Host '  ✓ DNS forwarding: blob.core.windows.net → Azure DNS' -ForegroundColor Green
+Write-Host '  ✓ DNS records: app1.azure.pvt, app2.azure.pvt' -ForegroundColor Green
 Write-Host ''
 Write-Host 'DNS Architecture:' -ForegroundColor Cyan
-Write-Host "  - $spoke1StorageAccountName.blob.core.windows.net → CNAME → privatelink → $spoke1NicInfo" -ForegroundColor Gray
-Write-Host "  - $spoke2StorageAccountName.blob.core.windows.net → CNAME → privatelink → $spoke2NicInfo" -ForegroundColor Gray
+Write-Host '  Storage Private Endpoints:' -ForegroundColor White
+Write-Host "    1. Query: $spoke1StorageAccountName.blob.core.windows.net" -ForegroundColor Gray
+Write-Host '    2. Hub forwards to Azure DNS → gets CNAME' -ForegroundColor Gray
+Write-Host "    3. CNAME: $spoke1StorageAccountName.privatelink.blob.core.windows.net" -ForegroundColor Gray
+Write-Host "    4. Hub hosts privatelink zone → returns A record: $spoke1NicInfo" -ForegroundColor Gray
+Write-Host ''
+Write-Host '  Spoke VMs:' -ForegroundColor White
+Write-Host '    - app1.azure.pvt → 10.2.10.4 (spoke1-vm-app)' -ForegroundColor Gray
+Write-Host '    - app2.azure.pvt → 10.3.10.4 (spoke2-vm-app)' -ForegroundColor Gray
 Write-Host ''
 Write-Host 'Next steps:' -ForegroundColor Cyan
 Write-Host '  1. Run validation: ./scripts/phase7-test.ps1' -ForegroundColor White

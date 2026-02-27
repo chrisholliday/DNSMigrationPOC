@@ -42,7 +42,7 @@ The design intentionally mirrors a production-like hub-and-spoke topology but wi
   - VM for testing resolution
   - Storage account + private endpoint
 
-Peering is configured between On-Prem <-> Hub, and Hub <-> each Spoke.
+Peering is configured between On-Prem ↔ Hub, and Hub ↔ each Spoke.
 
 ## Deployment Phases
 
@@ -53,9 +53,13 @@ All VNets are deployed with Azure DNS initially to avoid cross-VNet dependencies
 ## Documentation
 
 - Architecture overview: [docs/Architecture.md](docs/Architecture.md)
-- Deployment guide: [docs/Deployment-Guide.md](docs/Deployment-Guide.md)
-- Migration runbook: [docs/Migration-Runbook.md](docs/Migration-Runbook.md)
-- Security considerations beyond the POC: [docs/Security-Considerations.md](docs/Security-Considerations.md)
+- Deployment guide: [ProjectDeploymentGuide.md](ProjectDeploymentGuide.md)
+- Migration runbook: (not included in this repo yet)
+- Security considerations beyond the POC: (not included in this repo yet)
+
+## Audience
+
+This proof-of-concept is intended for the Azure platform engineering team and reviewers evaluating the migration approach and trade-offs.
 
 ## Default Region
 
@@ -63,12 +67,11 @@ All VNets are deployed with Azure DNS initially to avoid cross-VNet dependencies
 
 ## Naming Convention
 
-Simple, readable naming is used throughout:
+Examples follow Microsoft guidance: lower-case, hyphen-separated, and role-qualified where helpful.
 
-- `onprem-*`
-- `hub-*`
-- `spoke1-*`
-- `spoke2-*`
+- `rg-dnsmig-onprem`
+- `rg-dnsmig-hub`
+- `rg-dnsmig-spoke1`
+- `rg-dnsmig-spoke2`
 
-Each name includes **location** and **role** where helpful (for example: `hub-vm-dns`, `spoke1-vm-app`). Otherwise
-conforms to standard Microsoft naming guidance.
+Example resource names: `hub-vm-dns`, `spoke1-vm-app`, `spoke2-sa-{unique}`.

@@ -17,27 +17,27 @@ This sandbox models a minimal hub‑and‑spoke DNS topology with a staged migra
 
 ## Significant Objects to Create
 
-### DNSMIG-Onprem-RG (Resource Group)
+### Resource examples (naming)
 
-| Resource Group     | Resource Name    | Resource Type           | Role                                      |
-| ---                | ---              | ---                     | ---                                       |
-| RG-DNSMIG-onprem   | vnet-onprem      | virtual network         | "on prem" network                         |
-| RG-DNSMIG-onprem   | vm-dns-onprem    | virtual machine         | Linux DNS server for onprem.pvt DNS zone  |
-| RG-DNSMIG-hub      | vnet-hub         | virtual network         | "azure hub" network                       |
-| RG-DNSMIG-hub      | vm-hub           | virtual machine         | Linux DNS server for azure.pvt DNS zone   |
-| RG-DNSMIG-Spoke1   | vm-spoke1        | virtual machine         | basic vm to test name resolution          |
-| RG-DNSMIG-Spoke1   | saspoke2(random) | storage account         | storage account with unique name          |
-| RG-DNSMIG-Spoke2   | vm-spoke2        | virtual machine         | basic vm to test name resolution          |
-| RG-DNSMIG-Spoke2   | saspoke2(random) | storage account         | storage account with unique name           |
+| Resource Group        | Resource Name       | Resource Type           | Role                                      |
+| ---                   | ---                 | ---                     | ---                                       |
+| rg-dnsmig-onprem      | vnet-onprem         | virtual network         | on-prem network                           |
+| rg-dnsmig-onprem      | vm-onprem-dns       | virtual machine         | Linux DNS server for `onprem.pvt` zone    |
+| rg-dnsmig-hub         | vnet-hub            | virtual network         | hub network                               |
+| rg-dnsmig-hub         | vm-hub-dns          | virtual machine         | Linux DNS server for `azure.pvt` zone     |
+| rg-dnsmig-spoke1      | vm-spoke1           | virtual machine         | basic VM to test name resolution          |
+| rg-dnsmig-spoke1      | `saspoke1{unique}`  | storage account         | storage account with unique name          |
+| rg-dnsmig-spoke2      | vm-spoke2           | virtual machine         | basic VM to test name resolution          |
+| rg-dnsmig-spoke2      | `saspoke2{unique}`  | storage account         | storage account with unique name          |
 
 ## Access to objects
 
-- Objects should exist within a self contained set of virtual networks
-- Virtual networks should allow outbound (to the internet) access only, no inbound access via public ips
-- Internet access should be via NAT Gateway
-- Inbound access to virtual machines is restrcied to Azure Bastion
-- Remotely running commands via az cli or powershell is preferd over direct Bastion access
-- Traffic between networks should be freely open (this is not a network security excercise)
+- Objects should exist within a self-contained set of virtual networks.
+- Virtual networks should allow outbound (to the internet) access only; no inbound access via public IPs.
+- Internet access should be via NAT Gateway.
+- Inbound access to virtual machines is restricted to Azure Bastion.
+- Remotely running commands via `az` CLI or PowerShell is preferred over direct Bastion access.
+- Traffic between networks should be freely open (this is not a network security exercise).
 
 ## Migration & Demonstration Highlights
 

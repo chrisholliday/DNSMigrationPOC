@@ -2,34 +2,34 @@
 
 ## Goals
 
-The goal of this project is to reproduce a very simplified enviorment using cloud hosted dns servers for dns resolution, and to demonstrate the required actions to migrate the dns resolution to Azure private DNS while still allowing on prem devices to resolve cloud dns zones, and to ensure that on prem namespaces are still resolved from the cloud.
+The goal of this project is to reproduce a very simplified environment using cloud-hosted DNS servers for DNS resolution, and to demonstrate the required actions to migrate DNS resolution to Azure Private DNS while still allowing on-prem devices to resolve cloud DNS zones and ensuring on-prem namespaces are still resolved.
 
-This is not intended to server as a foundtion for working or production code, and the key objective of the deployment is to get a working enviornment stood up as quickly and easily as possible so that the actual migration efforts can be demonstrated.
+This is not intended to serve as a foundation for production code; the key objective is to get a working environment stood up quickly so the migration steps can be demonstrated.
 
-To that end the deployment of resources should follow a set of phased approches.
+The deployment follows a phased approach.
 
 ### Phase 1: Foundation Infrastructure
 
-**Goal:** Deploy all base networking with working defaults (Azure DNS)
+**Goal:** Deploy base networking with working defaults (Azure DNS).
 
 - Deploy On-Prem VNet (10.0.0.0/16)
-  - Resource Group: rg-dnsmig-onprem
-  - VMs: vm-onprem-dns
+  - Resource Group: `rg-dnsmig-onprem`
+  - VM: `vm-onprem-dns`
   - Azure Bastion, NAT Gateway
 - Deploy Hub VNet (10.1.0.0/16)
-  - Resource Group: rg-dnsmig-hub
-  - VM: vm-hub-dns
+  - Resource Group: `rg-dnsmig-hub`
+  - VM: `vm-hub-dns`
   - Azure Bastion, NAT Gateway
-- Deploy spoke1 VNet (10.2.0.0/16)
-  - Resource Group: rg-dnsmig-spoke1
-  - VMs: vm-spoke1
-  - Storage Account: globally unique generated name
+- Deploy Spoke1 VNet (10.2.0.0/16)
+  - Resource Group: `rg-dnsmig-spoke1`
+  - VM: `vm-spoke1`
+  - Storage account: example `saspoke1{unique}`
   - Azure Bastion, NAT Gateway
-- Deploy Hub VNet (10.3.0.0/16)
-  - Resource Group: rg-dnsmig-spoke2
-  - VM: vm-spoke1
+- Deploy Spoke2 VNet (10.3.0.0/16)
+  - Resource Group: `rg-dnsmig-spoke2`
+  - VM: `vm-spoke2`
+  - Storage account: example `saspoke2{unique}`
   - Azure Bastion, NAT Gateway
-  - Storage Account: globally unique generated name
 
 - **DNS:** All VNets use Azure DNS (168.63.129.16)
 - **Testing:** VM provisioning, internet connectivity, package updates
@@ -56,47 +56,56 @@ To that end the deployment of resources should follow a set of phased approches.
 
 ### Phase 4: Hosted DNS Cutover
 
-**Goal:** Switch to use custom DNS servers
+**Goal:** Switch VNets to use the custom DNS servers (BIND9 on VMs).
 
-- Update On-Prem VNet DNS setting to point dns to onprem-vm-dns
-- Update all other vnets to point dns to vm-hub-dns
-- Validate DHCP renewal propagates to VMs
-- Configure forwarding to vm-hub-dns for azure.pvt from vm-onprem-dns
-- Configure forwarding to vm-hub-dns for privatelink.blob.core.windows.net from vm-onprem-dns
-- Configure forwarding to vm-onprem-dns for all other zone from vm-hub-dns
-- Configure forwarding to azure dns for all other zone from vm-hub-dns
+- Update On-Prem VNet DNS setting to point to `vm-onprem-dns`.
+- Update Hub and Spoke VNets to point to `vm-hub-dns`.
+- Validate DHCP renewal propagates DNS changes to VMs.
+- Configure forwarding from `vm-onprem-dns` → `vm-hub-dns` for `azure.pvt` and `privatelink.blob.core.windows.net`.
+- Configure forwarding from `vm-hub-dns` → `vm-onprem-dns` for on-prem zones as needed.
+- Configure forwarding from `vm-hub-dns` → Azure DNS for other internet names.
 
-- **Testing:** All VMs resolve records in hosted zones, and common internet dns names
+- **Testing:** All VMs resolve records in hosted zones and common internet DNS names.
 
 ### Phase 5: Azure Private DNS + Resolver + Forwarding
 
-**Goal:** Deploy Azure Private DNS infrastructure and configure DNS forwarding
+**Goal:** Deploy Azure Private DNS infrastructure and configure DNS forwarding.
 
-- Create Azure Private DNS zone (privatelink.blob.core.windows.net)
-- Deploy Private DNS Resolver (inbound + outbound endpoints)
-- Link private endpoints to DNS zone (auto-registration enabled)
-- Configure hub-vm-dns to forward privatelink queries → resolver inbound endpoint
-- Configure onprem-vm-dns to forward privatelink queries → resolver inbound endpoint
-- **Testing:** Resolution works via both paths (BIND9 legacy + Azure Private DNS)
+- Create Azure Private DNS zone for `privatelink.blob.core.windows.net`.
+- Deploy Private DNS Resolver (inbound and outbound endpoints).
+- Link private endpoints to the Private DNS zone (enable auto-registration where applicable).
+- Configure `vm-hub-dns` to forward `privatelink` queries → Resolver inbound endpoint.
+- Configure `vm-onprem-dns` to forward `privatelink` queries → Resolver inbound endpoint.
+
+- **Testing:** Resolution works via both paths (legacy BIND9 and Azure Private DNS).
 
 ### Phase 6: Spoke1 Migration
 
-**Goal:** Migrate Spoke1 to Azure Private DNS
+**Goal:** Migrate Spoke1 to Azure Private DNS.
 
-- Switch Spoke1 VNet DNS to Azure-provided DNS (168.63.129.16)
-- Link Spoke1 VNet to Private DNS zone
-- Remove Spoke1 storage records from hub-vm-dns BIND9 (legacy cleanup)
-- **Testing:** Spoke1 resolves via Azure Private DNS, Spoke2 still via BIND9
+- Switch Spoke1 VNet DNS to Azure-provided DNS (168.63.129.16).
+- Link Spoke1 VNet to the Private DNS zone.
+- Remove Spoke1 storage records from `vm-hub-dns` BIND9 (legacy cleanup).
+
+- **Testing:** Spoke1 resolves via Azure Private DNS; Spoke2 remains on legacy BIND9.
 
 ### Phase 7: Spoke2 Migration
 
-**Goal:** Complete migration by moving Spoke2 to Azure Private DNS
+**Goal:** Complete migration by moving Spoke2 to Azure Private DNS.
 
-- Switch Spoke2 VNet DNS to Azure-provided DNS (168.63.129.16)
-- Link Spoke2 VNet to Private DNS zone
-- Remove privatelink zone from hub-vm-dns BIND9 (legacy cleanup complete)
-- **Testing:** Both spokes resolve via Azure Private DNS, migration complete
+- Switch Spoke2 VNet DNS to Azure-provided DNS (168.63.129.16).
+- Link Spoke2 VNet to the Private DNS zone.
+- Remove the `privatelink` zone from `vm-hub-dns` BIND9 (legacy cleanup complete).
+
+- **Testing:** Both spokes resolve via Azure Private DNS and migration is complete.
 
 ## Validation
 
-- A validation script should be available at each phase to confirm proper configuration.
+-- A validation script should be available at each phase to confirm proper configuration. See `./scripts` for phase-specific checks (if present).
+
+## Scripts
+
+- `./scripts/validate.ps1 -Phase <n>`: Phase-aware validation helper that runs `az` CLI checks and reports missing items.
+- `./scripts/destroy.ps1`: Deletes the POC resource groups (`rg-dnsmig-*`). Use `-Force` to skip confirmation.
+
+Run validation after each phase and run `destroy.ps1` to tear down the POC when finished.
